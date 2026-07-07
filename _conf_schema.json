@@ -73,15 +73,19 @@
     "default": "auto"
   },
   "send_mode": {
-    "description": "发送模式",
+    "description": "发送样式",
     "type": "string",
-    "hint": "normal：普通发送，先发文字再发图片，视频单独发；merged：图文合并，尽量把文字和图片放进一条普通消息，视频仍单独发；forward：合并转发，尝试发送 QQ 合并聊天记录，失败时自动退回图文合并。推荐先用 merged，想要更整齐的多图展示时再试 forward。",
-    "default": "merged"
+    "hint": "普通消息：按普通 QQ 消息发送；合并转发：尝试发送 QQ 合并聊天记录，失败时自动退回普通消息。图片是否和文字合并由下面的“合并发送文字和图片”开关单独控制。",
+    "default": "普通消息",
+    "options": [
+      "普通消息",
+      "合并转发"
+    ]
   },
   "merge_text_and_images": {
-    "description": "兼容旧版本：合并发送文字和图片",
+    "description": "合并发送文字和图片",
     "type": "bool",
-    "hint": "旧配置项，保留是为了兼容已经安装过的版本。新版本请优先使用“发送模式”。如果发送模式为空，开启这里会等同于 merged，关闭会等同于 normal。",
+    "hint": "开启后，在“普通消息”样式下会尽量把推文文字和图片放进同一条消息；关闭后会先发文字，再逐张发图片。合并转发样式发送失败并回退到普通消息时，也会遵守这个开关。",
     "default": true
   },
   "max_merged_images": {

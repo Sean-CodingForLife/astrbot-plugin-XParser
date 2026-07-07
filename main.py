@@ -75,11 +75,8 @@ class XParserPlugin(Star):
             self._cfg("tweet_text_template", DEFAULT_TWEET_TEXT_TEMPLATE)
             or DEFAULT_TWEET_TEXT_TEMPLATE
         )
+        self.send_mode = self._normalize_send_mode(self._cfg("send_mode", "普通消息"))
         self.merge_text_and_images = bool(self._cfg("merge_text_and_images", True))
-        self.send_mode = self._normalize_send_mode(
-            self._cfg("send_mode", None),
-            legacy_merge_text_and_images=self.merge_text_and_images,
-        )
         self.max_merged_images = int(self._cfg("max_merged_images", 4))
         self.send_video_as_file = bool(self._cfg("send_video_as_file", True))
         self.cache_ttl_hours = int(self._cfg("cache_ttl_hours", 24))
@@ -238,14 +235,19 @@ class XParserPlugin(Star):
             if await self._send_forward_message(event, text, image_paths, len(videos)):
                 pass
             else:
-                logger.warning("Forward message send failed or unsupported, falling back to merged mode")
-                await self._send_ordinary_tweet_message(event, text, image_paths, prefer_merged=True)
+                logger.warning("Forward message send failed or unsupported, falling back to normal message mode")
+                await self._send_ordinary_tweet_message(
+                    event,
+                    text,
+                    image_paths,
+                    prefer_merged=self.merge_text_and_images,
+                )
         else:
             await self._send_ordinary_tweet_message(
                 event,
                 text,
                 image_paths,
-                prefer_merged=self.send_mode == "merged",
+                prefer_merged=self.merge_text_and_images,
             )
 
         for video_path, source_url in videos:
@@ -510,26 +512,21 @@ class XParserPlugin(Star):
         return "auto"
 
     @staticmethod
-    def _normalize_send_mode(value: Any, *, legacy_merge_text_and_images: bool) -> str:
-        if value in (None, ""):
-            return "merged" if legacy_merge_text_and_images else "normal"
-
+    def _normalize_send_mode(value: Any) -> str:
         mode = str(value).strip().lower()
         aliases = {
+            "普通消息": "normal",
             "普通发送": "normal",
-            "图文合并": "merged",
             "合并转发": "forward",
             "plain": "normal",
-            "merge": "merged",
             "forward": "forward",
             "normal": "normal",
-            "merged": "merged",
         }
         normalized = aliases.get(mode, mode)
-        if normalized in {"normal", "merged", "forward"}:
+        if normalized in {"normal", "forward"}:
             return normalized
-        logger.warning(f"未知发送模式 {value!r}，已回退为图文合并")
-        return "merged"
+        logger.warning(f"未知发送模式 {value!r}，已回退为普通消息")
+        return "normal"
 
     def _cleanup_cache(self) -> None:
         if self.cache_ttl_hours <= 0:
