@@ -48,6 +48,10 @@ class XParserPlugin(Star):
         self.media_processor = MediaProcessor(
             forward_threshold_mb=int(self._cfg("download_limit_mb", 100)),
             pil_compress_target_kb=int(self._cfg("image_compress_target_kb", 2048)),
+            image_compress_enabled=bool(self._cfg("enable_image_compression", True)),
+            image_compress_mode=self._cfg("image_compress_mode", "target_size"),
+            image_compress_quality=int(self._cfg("image_compress_quality", 85)),
+            video_variant_strategy=self._cfg("video_variant_strategy", "highest"),
             display_media_details=True,
             enable_proxy=bool(self._cfg("enable_proxy", True)),
             proxy_url=self._cfg("proxy_url", "http://127.0.0.1:7890"),

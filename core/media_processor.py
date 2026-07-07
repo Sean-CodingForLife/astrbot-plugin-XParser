@@ -51,6 +51,10 @@ class MediaProcessor:
         self,
         forward_threshold_mb: int = 25,
         pil_compress_target_kb: int = 2048,
+        image_compress_enabled: bool = True,
+        image_compress_mode: str = "target_size",
+        image_compress_quality: int = 85,
+        video_variant_strategy: str = "highest",
         display_media_details: bool = True,
         enable_proxy: bool = True,
         proxy_url: str | None = "http://127.0.0.1:7890",
@@ -69,6 +73,10 @@ class MediaProcessor:
         self.forward_threshold_bytes = forward_threshold_mb * 1024 * 1024
         self.pil_compress_target_kb = pil_compress_target_kb
         self.pil_compress_target_bytes = pil_compress_target_kb * 1024
+        self.image_compress_enabled = image_compress_enabled
+        self.image_compress_mode = self._normalize_image_compress_mode(image_compress_mode)
+        self.image_compress_quality = max(1, min(100, int(image_compress_quality)))
+        self.video_variant_strategy = self._normalize_video_variant_strategy(video_variant_strategy)
         self.display_media_details = display_media_details
         self.enable_proxy = enable_proxy
         self.proxy_url = proxy_url
@@ -79,9 +87,29 @@ class MediaProcessor:
         logger.info(
             f"MediaProcessor 初始化 | "
             f"转发阈值: {forward_threshold_mb}MB | "
+            f"图片压缩: {'开启' if image_compress_enabled else '关闭'} | "
+            f"压缩模式: {self.image_compress_mode} | "
             f"PIL 压缩目标: {pil_compress_target_kb}KB | "
+            f"图片质量: {self.image_compress_quality} | "
+            f"视频变体策略: {self.video_variant_strategy} | "
             f"媒体详情: {'开启' if display_media_details else '关闭'}"
         )
+
+    @staticmethod
+    def _normalize_image_compress_mode(value: str) -> str:
+        mode = str(value or "target_size").strip().lower()
+        if mode in {"target_size", "quality"}:
+            return mode
+        logger.warning(f"未知图片压缩模式 {value!r}，已回退为 target_size")
+        return "target_size"
+
+    @staticmethod
+    def _normalize_video_variant_strategy(value: str) -> str:
+        strategy = str(value or "highest").strip().lower()
+        if strategy in {"highest", "balanced", "lowest"}:
+            return strategy
+        logger.warning(f"未知视频变体策略 {value!r}，已回退为 highest")
+        return "highest"
 
     # ========================================================================
     # 生命周期管理
@@ -155,11 +183,13 @@ class MediaProcessor:
                     }
             return None
 
-        # Step 2: 按比特率降序排列（None 视为 0）
-        mp4_variants.sort(key=lambda v: v.bit_rate or 0, reverse=True)
-
-        # Step 3: 返回比特率最高的 MP4 变体
-        best = mp4_variants[0]
+        mp4_variants.sort(key=lambda v: v.bit_rate or 0)
+        if self.video_variant_strategy == "lowest":
+            best = mp4_variants[0]
+        elif self.video_variant_strategy == "balanced":
+            best = mp4_variants[len(mp4_variants) // 2]
+        else:
+            best = mp4_variants[-1]
         return {
             "url": best.url,
             "bit_rate": best.bit_rate,
@@ -515,12 +545,20 @@ class MediaProcessor:
         """
         if not img_data:
             return img_data
+        if not self.image_compress_enabled:
+            return img_data
 
         try:
+            target_kb = (
+                self.pil_compress_target_kb
+                if self.image_compress_mode == "target_size"
+                else 0
+            )
             compressed = await asyncio.to_thread(
                 self._compress_image_sync,
                 img_data,
-                target_kb=self.pil_compress_target_kb,
+                target_kb=target_kb,
+                quality=self.image_compress_quality,
             )
 
             if len(compressed) < len(img_data):

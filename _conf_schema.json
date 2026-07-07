@@ -106,12 +106,37 @@
     "hint": "开启后，插件会优先把 Stream API 上传后的文件作为视频消息发送；如果视频消息仍失败，再改为群文件/私聊文件。建议开启。",
     "default": true
   },
+  "enable_image_compression": {
+    "description": "启用图片压缩",
+    "type": "bool",
+    "hint": "开启后，插件会使用 Pillow/PIL 对图片进行压缩。关闭后会尽量发送原图，但大图可能发送更慢或失败。",
+    "default": true
+  },
+  "image_compress_mode": {
+    "description": "图片压缩方式",
+    "type": "string",
+    "hint": "target_size：按目标大小压缩，会尽量压到指定 KB 以内；quality：按固定质量压缩，不强求目标体积。默认 target_size。",
+    "default": "target_size"
+  },
+  "image_compress_quality": {
+    "description": "图片压缩质量（1-100）",
+    "type": "int",
+    "hint": "数值越高画质越好、体积越大。target_size 模式下这是质量上限；quality 模式下这是固定质量。推荐 85。",
+    "default": 85,
+    "slider": { "min": 1, "max": 100, "step": 1 }
+  },
   "image_compress_target_kb": {
     "description": "图片压缩目标大小（KB）",
     "type": "int",
-    "hint": "图片过大时会压缩到接近这个大小再发送。填 0 表示不压缩。默认 2048KB 比较稳。",
+    "hint": "仅 image_compress_mode=target_size 时生效。图片过大时会压缩到接近这个大小再发送。填 0 表示不按目标大小压缩。",
     "default": 2048,
     "slider": { "min": 0, "max": 8192, "step": 256 }
+  },
+  "video_variant_strategy": {
+    "description": "视频质量选择策略",
+    "type": "string",
+    "hint": "当前不会用 ffmpeg 重新压缩视频，而是在 X/Twitter 提供的 MP4 清晰度里选择。highest：最高画质；balanced：中等画质；lowest：最低体积。默认 highest。",
+    "default": "highest"
   },
   "cache_ttl_hours": {
     "description": "本地缓存保留时间（小时）",
