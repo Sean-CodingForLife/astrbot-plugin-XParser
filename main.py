@@ -78,6 +78,19 @@ class XParserPlugin(Star):
         self.send_mode = self._normalize_send_mode(self._cfg("send_mode", "普通消息"))
         self.merge_text_and_images = bool(self._cfg("merge_text_and_images", True))
         self.max_merged_images = int(self._cfg("max_merged_images", 4))
+        self.cooldown_seconds = max(0, int(self._cfg("cooldown_seconds", 10)))
+        self.same_tweet_cooldown_seconds = max(0, int(self._cfg("same_tweet_cooldown_seconds", 120)))
+        self.acl_mode = self._normalize_acl_mode(self._cfg("acl_mode", "关闭"))
+        self.allowed_group_ids = self._normalize_id_set(self._cfg("allowed_group_ids", []))
+        self.allowed_private_user_ids = self._normalize_id_set(
+            self._cfg("allowed_private_user_ids", [])
+        )
+        self.blocked_group_ids = self._normalize_id_set(self._cfg("blocked_group_ids", []))
+        self.blocked_private_user_ids = self._normalize_id_set(
+            self._cfg("blocked_private_user_ids", [])
+        )
+        self._session_last_parse_at: dict[str, float] = {}
+        self._session_tweet_last_parse_at: dict[tuple[str, str], float] = {}
         self.send_video_as_file = bool(self._cfg("send_video_as_file", True))
         self.cache_ttl_hours = int(self._cfg("cache_ttl_hours", 24))
         self.cache_dir: Path = StarTools.get_data_dir("astrbot_plugin_xparser")
@@ -99,6 +112,8 @@ class XParserPlugin(Star):
         if not tweet_id:
             await event.send(event.chain_result([Plain("请发送推文链接，例如 /xparse https://x.com/user/status/123")]))
             return
+        if not await self._can_parse_event(event, tweet_id, silent=False):
+            return
         await self._parse_and_send(event, tweet_id)
 
     @filter.event_message_type(filter.EventMessageType.ALL)
@@ -111,7 +126,79 @@ class XParserPlugin(Star):
         tweet_id = self._extract_tweet_id(message_text)
         if not tweet_id:
             return
+        if not await self._can_parse_event(event, tweet_id, silent=True):
+            return
         await self._parse_and_send(event, tweet_id)
+
+    async def _can_parse_event(
+        self,
+        event: AstrMessageEvent,
+        tweet_id: str,
+        *,
+        silent: bool,
+    ) -> bool:
+        if not self._is_acl_allowed(event):
+            if not silent:
+                await event.send(event.chain_result([Plain("当前会话不在 XParser 允许解析范围内。")]))
+            return False
+
+        wait_seconds = self._cooldown_wait_seconds(event, tweet_id)
+        if wait_seconds > 0:
+            if not silent:
+                await event.send(event.chain_result([Plain(f"解析冷却中，请 {wait_seconds} 秒后再试。")]))
+            return False
+
+        session_key = self._session_key(event)
+        now = time.time()
+        self._session_last_parse_at[session_key] = now
+        self._session_tweet_last_parse_at[(session_key, tweet_id)] = now
+        return True
+
+    def _cooldown_wait_seconds(self, event: AstrMessageEvent, tweet_id: str) -> int:
+        session_key = self._session_key(event)
+        now = time.time()
+        waits: list[float] = []
+
+        if self.cooldown_seconds > 0:
+            last_parse_at = self._session_last_parse_at.get(session_key)
+            if last_parse_at is not None:
+                waits.append(last_parse_at + self.cooldown_seconds - now)
+
+        if self.same_tweet_cooldown_seconds > 0:
+            last_tweet_parse_at = self._session_tweet_last_parse_at.get((session_key, tweet_id))
+            if last_tweet_parse_at is not None:
+                waits.append(last_tweet_parse_at + self.same_tweet_cooldown_seconds - now)
+
+        return max(0, int(max(waits, default=0) + 0.999))
+
+    def _is_acl_allowed(self, event: AstrMessageEvent) -> bool:
+        if self.acl_mode == "off":
+            return True
+
+        group_id = self._safe_id(event.get_group_id())
+        user_id = self._safe_id(event.get_sender_id())
+        is_group = bool(group_id)
+
+        if is_group:
+            allowed_ids = self.allowed_group_ids
+            blocked_ids = self.blocked_group_ids
+            target_id = group_id
+        else:
+            allowed_ids = self.allowed_private_user_ids
+            blocked_ids = self.blocked_private_user_ids
+            target_id = user_id
+
+        if self.acl_mode == "whitelist":
+            return not allowed_ids or target_id in allowed_ids
+        if self.acl_mode == "blacklist":
+            return target_id not in blocked_ids
+        return True
+
+    def _session_key(self, event: AstrMessageEvent) -> str:
+        group_id = self._safe_id(event.get_group_id())
+        if group_id:
+            return f"group:{group_id}"
+        return f"private:{self._safe_id(event.get_sender_id())}"
 
     async def _parse_and_send(self, event: AstrMessageEvent, tweet_id: str) -> None:
         try:
@@ -527,6 +614,40 @@ class XParserPlugin(Star):
             return normalized
         logger.warning(f"未知发送模式 {value!r}，已回退为普通消息")
         return "normal"
+
+    @staticmethod
+    def _normalize_acl_mode(value: Any) -> str:
+        mode = str(value or "关闭").strip().lower()
+        aliases = {
+            "关闭": "off",
+            "off": "off",
+            "白名单": "whitelist",
+            "whitelist": "whitelist",
+            "黑名单": "blacklist",
+            "blacklist": "blacklist",
+        }
+        normalized = aliases.get(mode, mode)
+        if normalized in {"off", "whitelist", "blacklist"}:
+            return normalized
+        logger.warning(f"未知访问控制模式 {value!r}，已回退为关闭")
+        return "off"
+
+    @staticmethod
+    def _normalize_id_set(value: Any) -> set[str]:
+        if value is None:
+            return set()
+        if isinstance(value, (str, int)):
+            values = [value]
+        else:
+            try:
+                values = list(value)
+            except TypeError:
+                values = [value]
+        return {str(item).strip() for item in values if str(item).strip()}
+
+    @staticmethod
+    def _safe_id(value: Any) -> str:
+        return str(value or "").strip()
 
     def _cleanup_cache(self) -> None:
         if self.cache_ttl_hours <= 0:

@@ -25,6 +25,7 @@ All notable changes to this project will be documented in this file.
 - Configurable tweet text output template.
 - README compatibility matrix for AstrBot, aiocqhttp/OneBot, NapCat, QQ chat scenes, and supported tweet URL sources.
 - Configurable message style selector for normal messages or QQ forward messages, plus a separate text-image merge switch.
+- Per-session parse cooldown, same-tweet repeat cooldown, and group/private allowlist/blocklist access control.
 
 ### Fixed
 

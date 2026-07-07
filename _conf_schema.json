@@ -60,6 +60,55 @@
     "hint": "开启后，群聊或私聊里出现 x.com/twitter.com 的推文链接时会自动解析。关闭后只能用 /xparse <推文链接> 手动解析。",
     "default": true
   },
+  "cooldown_seconds": {
+    "description": "同一会话解析冷却（秒）",
+    "type": "int",
+    "hint": "同一个群聊或同一个私聊，两次解析之间至少间隔多少秒。自动解析触发冷却时会静默忽略，手动 /xparse 触发冷却时会提示剩余秒数。填 0 表示不限制。",
+    "default": 10,
+    "slider": { "min": 0, "max": 300, "step": 1 }
+  },
+  "same_tweet_cooldown_seconds": {
+    "description": "同一推文重复解析冷却（秒）",
+    "type": "int",
+    "hint": "同一个群聊或同一个私聊里，重复解析同一条推文需要间隔多少秒。用于避免群里反复贴同一个链接刷屏。填 0 表示不限制。",
+    "default": 120,
+    "slider": { "min": 0, "max": 3600, "step": 10 }
+  },
+  "acl_mode": {
+    "description": "访问控制模式",
+    "type": "string",
+    "hint": "关闭：所有群聊和私聊都允许使用；白名单：只允许白名单里的群号/用户 QQ 使用，名单为空时不限制；黑名单：禁止黑名单里的群号/用户 QQ 使用。",
+    "default": "关闭",
+    "options": [
+      "关闭",
+      "白名单",
+      "黑名单"
+    ]
+  },
+  "allowed_group_ids": {
+    "description": "群聊白名单",
+    "type": "list",
+    "hint": "访问控制模式为白名单时生效。填写允许使用 XParser 的群号，例如 123456789。留空表示不限制群聊。",
+    "default": []
+  },
+  "allowed_private_user_ids": {
+    "description": "私聊白名单",
+    "type": "list",
+    "hint": "访问控制模式为白名单时生效。填写允许私聊使用 XParser 的用户 QQ。留空表示不限制私聊。",
+    "default": []
+  },
+  "blocked_group_ids": {
+    "description": "群聊黑名单",
+    "type": "list",
+    "hint": "访问控制模式为黑名单时生效。填写禁止使用 XParser 的群号。",
+    "default": []
+  },
+  "blocked_private_user_ids": {
+    "description": "私聊黑名单",
+    "type": "list",
+    "hint": "访问控制模式为黑名单时生效。填写禁止私聊使用 XParser 的用户 QQ。",
+    "default": []
+  },
   "tweet_text_template": {
     "description": "推文文字输出模板",
     "type": "text",
