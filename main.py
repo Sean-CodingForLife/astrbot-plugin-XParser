@@ -76,6 +76,10 @@ class XParserPlugin(Star):
             or DEFAULT_TWEET_TEXT_TEMPLATE
         )
         self.merge_text_and_images = bool(self._cfg("merge_text_and_images", True))
+        self.send_mode = self._normalize_send_mode(
+            self._cfg("send_mode", None),
+            legacy_merge_text_and_images=self.merge_text_and_images,
+        )
         self.max_merged_images = int(self._cfg("max_merged_images", 4))
         self.send_video_as_file = bool(self._cfg("send_video_as_file", True))
         self.cache_ttl_hours = int(self._cfg("cache_ttl_hours", 24))
@@ -230,17 +234,79 @@ class XParserPlugin(Star):
             await event.send(event.chain_result([Plain(text)]))
             return
 
+        if self.send_mode == "forward" and (image_paths or videos):
+            if await self._send_forward_message(event, text, image_paths, len(videos)):
+                pass
+            else:
+                logger.warning("Forward message send failed or unsupported, falling back to merged mode")
+                await self._send_ordinary_tweet_message(event, text, image_paths, prefer_merged=True)
+        else:
+            await self._send_ordinary_tweet_message(
+                event,
+                text,
+                image_paths,
+                prefer_merged=self.send_mode == "merged",
+            )
+
+        for video_path, source_url in videos:
+            await self._send_video(event, video_path, source_url)
+
+    async def _send_ordinary_tweet_message(
+        self,
+        event: AstrMessageEvent,
+        text: str,
+        image_paths: list[Path],
+        *,
+        prefer_merged: bool,
+    ) -> None:
         if image_paths:
-            if self.merge_text_and_images:
+            if prefer_merged:
                 await self._send_text_with_images(event, text, image_paths)
             else:
                 await event.send(event.chain_result([Plain(text)]))
                 await self._send_images(event, image_paths)
-        else:
-            await event.send(event.chain_result([Plain(text)]))
+            return
 
-        for video_path, source_url in videos:
-            await self._send_video(event, video_path, source_url)
+        await event.send(event.chain_result([Plain(text)]))
+
+    async def _send_forward_message(
+        self,
+        event: AstrMessageEvent,
+        text: str,
+        image_paths: list[Path],
+        video_count: int,
+    ) -> bool:
+        if not NapCatStreamClient.is_aiocqhttp_event(event):
+            return False
+
+        nodes: list[dict[str, Any]] = [self._forward_node([self._plain_segment(text)])]
+        for index, path in enumerate(image_paths, start=1):
+            nodes.append(
+                self._forward_node(
+                    [
+                        self._plain_segment(f"图片 {index}/{len(image_paths)}"),
+                        self._image_segment(path),
+                    ]
+                )
+            )
+
+        if video_count:
+            nodes.append(
+                self._forward_node(
+                    [
+                        self._plain_segment(
+                            f"视频/GIF 共 {video_count} 个，将在合并转发消息后单独发送。"
+                        )
+                    ]
+                )
+            )
+
+        try:
+            await self._send_onebot_forward(event, nodes)
+            return True
+        except Exception as exc:
+            logger.warning(f"OneBot forward message send failed: {exc}")
+            return False
 
     async def _download_image(self, tweet_id: str, url: str) -> Path | None:
         try:
@@ -327,6 +393,42 @@ class XParserPlugin(Star):
                 message=message,
             )
 
+    async def _send_onebot_forward(
+        self,
+        event: AstrMessageEvent,
+        messages: list[dict[str, Any]],
+    ) -> None:
+        bot = getattr(event, "bot", None)
+        if bot is None:
+            raise RuntimeError("当前 aiocqhttp 事件没有可用的 bot 客户端")
+
+        group_id = event.get_group_id()
+        user_id = event.get_sender_id()
+        if group_id:
+            await self._call_onebot_action(
+                bot,
+                "send_group_forward_msg",
+                group_id=int(group_id),
+                messages=messages,
+            )
+        else:
+            await self._call_onebot_action(
+                bot,
+                "send_private_forward_msg",
+                user_id=int(user_id),
+                messages=messages,
+            )
+
+    def _forward_node(self, content: list[dict[str, Any]]) -> dict[str, Any]:
+        return {
+            "type": "node",
+            "data": {
+                "name": "XParser",
+                "uin": "10000",
+                "content": content,
+            },
+        }
+
     @staticmethod
     def _plain_segment(text: str) -> dict[str, Any]:
         return {"type": "text", "data": {"text": text}}
@@ -406,6 +508,28 @@ class XParserPlugin(Star):
             return mode
         logger.warning(f"未知媒体传输模式 {value!r}，已回退为 auto")
         return "auto"
+
+    @staticmethod
+    def _normalize_send_mode(value: Any, *, legacy_merge_text_and_images: bool) -> str:
+        if value in (None, ""):
+            return "merged" if legacy_merge_text_and_images else "normal"
+
+        mode = str(value).strip().lower()
+        aliases = {
+            "普通发送": "normal",
+            "图文合并": "merged",
+            "合并转发": "forward",
+            "plain": "normal",
+            "merge": "merged",
+            "forward": "forward",
+            "normal": "normal",
+            "merged": "merged",
+        }
+        normalized = aliases.get(mode, mode)
+        if normalized in {"normal", "merged", "forward"}:
+            return normalized
+        logger.warning(f"未知发送模式 {value!r}，已回退为图文合并")
+        return "merged"
 
     def _cleanup_cache(self) -> None:
         if self.cache_ttl_hours <= 0:

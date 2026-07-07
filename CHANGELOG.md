@@ -23,6 +23,8 @@ All notable changes to this project will be documented in this file.
 - Configurable image compression enablement, mode, quality, and target size.
 - Configurable video variant selection strategy.
 - Configurable tweet text output template.
+- README compatibility matrix for AstrBot, aiocqhttp/OneBot, NapCat, QQ chat scenes, and supported tweet URL sources.
+- Configurable send modes: normal sending, text-image merged sending, and QQ forward-message sending with merged fallback.
 
 ### Fixed
 

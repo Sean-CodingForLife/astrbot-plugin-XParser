@@ -72,10 +72,16 @@
     "hint": "推荐填 auto。auto：小视频先走普通消息，较大视频或发送失败时走 NapCat Stream API；stream：视频强制走 Stream API，适合 AstrBot 和 NapCat 在不同容器且没有共享目录；local：只走本地文件路径，不适合你的双容器无共享目录部署。",
     "default": "auto"
   },
+  "send_mode": {
+    "description": "发送模式",
+    "type": "string",
+    "hint": "normal：普通发送，先发文字再发图片，视频单独发；merged：图文合并，尽量把文字和图片放进一条普通消息，视频仍单独发；forward：合并转发，尝试发送 QQ 合并聊天记录，失败时自动退回图文合并。推荐先用 merged，想要更整齐的多图展示时再试 forward。",
+    "default": "merged"
+  },
   "merge_text_and_images": {
-    "description": "合并发送文字和图片",
+    "description": "兼容旧版本：合并发送文字和图片",
     "type": "bool",
-    "hint": "开启后，推文文字摘要和图片会尽量合并成一条图文消息，减少刷屏。视频仍会单独发送，因为 QQ/OneBot 对图文视频混合消息兼容性较差。",
+    "hint": "旧配置项，保留是为了兼容已经安装过的版本。新版本请优先使用“发送模式”。如果发送模式为空，开启这里会等同于 merged，关闭会等同于 normal。",
     "default": true
   },
   "max_merged_images": {
