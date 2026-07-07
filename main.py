@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import re
 import time
 from pathlib import Path
@@ -55,7 +56,7 @@ class XParserPlugin(Star):
             max_bytes=int(self._cfg("stream_max_mb", 100)) * 1024 * 1024
         )
         self.stream_threshold_bytes = int(self._cfg("stream_threshold_mb", 8)) * 1024 * 1024
-        self.transfer_mode = str(self._cfg("media_transfer_mode", "auto")).lower()
+        self.transfer_mode = self._normalize_transfer_mode(self._cfg("media_transfer_mode", "auto"))
         self.enable_auto_parse = bool(self._cfg("enable_auto_parse", True))
         self.send_video_as_file = bool(self._cfg("send_video_as_file", True))
         self.cache_ttl_hours = int(self._cfg("cache_ttl_hours", 24))
@@ -76,7 +77,7 @@ class XParserPlugin(Star):
     async def cmd_parse(self, event: AstrMessageEvent, url: str = ""):
         tweet_id = self._extract_tweet_id(url or event.message_str)
         if not tweet_id:
-            yield event.chain_result([Plain("请发送推文链接，例如 /xparse https://x.com/user/status/123")])
+            await event.send(event.chain_result([Plain("请发送推文链接，例如 /xparse https://x.com/user/status/123")]))
             return
         await self._parse_and_send(event, tweet_id)
 
@@ -84,7 +85,10 @@ class XParserPlugin(Star):
     async def auto_parse_tweet_url(self, event: AstrMessageEvent):
         if not self.enable_auto_parse:
             return
-        tweet_id = self._extract_tweet_id(event.message_str)
+        message_text = event.message_str or ""
+        if message_text.lstrip().startswith("/xparse"):
+            return
+        tweet_id = self._extract_tweet_id(message_text)
         if not tweet_id:
             return
         await self._parse_and_send(event, tweet_id)
@@ -159,6 +163,7 @@ class XParserPlugin(Star):
             return
 
         image_components = []
+        image_paths: list[Path] = []
         videos: list[tuple[Path, str]] = []
 
         for key in tweet.attachments.media_keys:
@@ -166,21 +171,25 @@ class XParserPlugin(Star):
             if not media:
                 continue
             if media.type == "photo" and media.url:
-                component = await self._download_image_component(tweet.id, media.url)
-                if component:
-                    image_components.append(component)
+                image_path = await self._download_image(tweet.id, media.url)
+                if image_path:
+                    image_paths.append(image_path)
             elif media.type in ("video", "animated_gif") and media.url:
                 video_path = await self._download_video(tweet.id, media.url)
                 if video_path:
                     videos.append((video_path, media.url))
 
-        if image_components:
-            await event.send(event.chain_result(image_components))
+        if image_paths:
+            if NapCatStreamClient.is_aiocqhttp_event(event):
+                await self._send_images_via_onebot_base64(event, image_paths)
+            else:
+                image_components = [Image.fromFileSystem(str(path)) for path in image_paths]
+                await event.send(event.chain_result(image_components))
 
         for video_path, source_url in videos:
             await self._send_video(event, video_path, source_url)
 
-    async def _download_image_component(self, tweet_id: str, url: str) -> Image | None:
+    async def _download_image(self, tweet_id: str, url: str) -> Path | None:
         try:
             data = await self.media_processor.download_media(url)
             if not data:
@@ -188,10 +197,44 @@ class XParserPlugin(Star):
             data = await self.media_processor.compress_image(data)
             path = self.image_dir / f"img_{tweet_id}_{hash(url) & 0xFFFFFFFF}.jpg"
             path.write_bytes(data)
-            return Image.fromFileSystem(str(path))
+            return path
         except Exception as exc:
             logger.warning(f"Image media download failed: {url} - {exc}")
             return None
+
+    async def _send_images_via_onebot_base64(
+        self, event: AstrMessageEvent, image_paths: list[Path]
+    ) -> None:
+        bot = getattr(event, "bot", None)
+        if bot is None:
+            await event.send(
+                event.chain_result([Plain("图片发送失败：当前 aiocqhttp 事件没有可用的 bot 客户端。")])
+            )
+            return
+
+        group_id = event.get_group_id()
+        user_id = event.get_sender_id()
+        for path in image_paths:
+            try:
+                encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+                message = [{"type": "image", "data": {"file": f"base64://{encoded}"}}]
+                if group_id:
+                    await self._call_onebot_action(
+                        bot,
+                        "send_group_msg",
+                        group_id=int(group_id),
+                        message=message,
+                    )
+                else:
+                    await self._call_onebot_action(
+                        bot,
+                        "send_private_msg",
+                        user_id=int(user_id),
+                        message=message,
+                    )
+            except Exception as exc:
+                logger.warning(f"OneBot base64 image send failed: {path} - {exc}")
+                await event.send(event.chain_result([Plain(f"图片发送失败：{path.name}")]))
 
     async def _download_video(self, tweet_id: str, url: str) -> Path | None:
         try:
@@ -235,6 +278,28 @@ class XParserPlugin(Star):
     def _extract_tweet_id(text: str) -> str | None:
         match = TWEET_URL_PATTERN.search(text or "")
         return match.group(1) if match else None
+
+    @staticmethod
+    async def _call_onebot_action(bot: Any, action: str, **payload: Any) -> Any:
+        direct = getattr(bot, action, None)
+        if direct is not None:
+            return await direct(**payload)
+
+        for method_name in ("call_action", "call_api", "api"):
+            caller = getattr(bot, method_name, None)
+            if caller is None:
+                continue
+            return await caller(action, **payload)
+
+        raise RuntimeError(f"当前 OneBot 客户端不支持动作 {action}")
+
+    @staticmethod
+    def _normalize_transfer_mode(value: Any) -> str:
+        mode = str(value or "auto").strip().lower()
+        if mode in {"auto", "stream", "local"}:
+            return mode
+        logger.warning(f"未知媒体传输模式 {value!r}，已回退为 auto")
+        return "auto"
 
     def _cleanup_cache(self) -> None:
         if self.cache_ttl_hours <= 0:

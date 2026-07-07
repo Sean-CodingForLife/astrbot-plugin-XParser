@@ -88,12 +88,6 @@ class NapCatStreamClient:
             complete_payload = {
                 "stream_id": stream_id,
                 "is_complete": True,
-                "total_chunks": total_chunks,
-                "file_size": size,
-                "expected_sha256": expected_sha256,
-                "filename": file_name,
-                "mime": mime_type,
-                "folder": folder,
             }
             final_result = await self._call_stream_action(bot, complete_payload)
             uploaded_path = self._extract_uploaded_path(final_result)
@@ -133,13 +127,17 @@ class NapCatStreamClient:
         try:
             group_id = event.get_group_id()
             if group_id:
-                await bot.upload_group_file(
+                await self._call_onebot_action(
+                    bot,
+                    "upload_group_file",
                     group_id=int(group_id),
                     file=uploaded_path,
                     name=file_name,
                 )
             else:
-                await bot.upload_private_file(
+                await self._call_onebot_action(
+                    bot,
+                    "upload_private_file",
                     user_id=int(event.get_sender_id()),
                     file=uploaded_path,
                     name=file_name,
@@ -150,16 +148,21 @@ class NapCatStreamClient:
             return False
 
     async def _call_stream_action(self, bot: Any, payload: dict[str, Any]) -> Any:
-        if hasattr(bot, "upload_file_stream"):
-            return await bot.upload_file_stream(**payload)
+        return await self._call_onebot_action(bot, "upload_file_stream", **payload)
+
+    @staticmethod
+    async def _call_onebot_action(bot: Any, action: str, **payload: Any) -> Any:
+        direct = getattr(bot, action, None)
+        if direct is not None:
+            return await direct(**payload)
 
         for method_name in ("call_action", "call_api", "api"):
             caller = getattr(bot, method_name, None)
             if caller is None:
                 continue
-            return await caller("upload_file_stream", **payload)
+            return await caller(action, **payload)
 
-        raise RuntimeError("current OneBot client has no stream action caller")
+        raise RuntimeError(f"current OneBot client has no action caller for {action}")
 
     @staticmethod
     def _extract_uploaded_path(result: Any) -> str | None:
