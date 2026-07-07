@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import base64
 import re
 import time
 from pathlib import Path
@@ -9,8 +8,15 @@ from typing import Any
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
-from astrbot.core.message.components import Image, Plain, Video
+from astrbot.core.message.components import Plain
 
+from .adapters.onebot_napcat import OneBotNapCatSender
+from .core.access_control import (
+    AccessControl,
+    AccessControlConfig,
+    normalize_acl_mode,
+    normalize_id_set,
+)
 from .core.media_processor import MediaProcessor
 from .core.napcat_stream_client import NapCatStreamClient
 from .core.x_api_client import XApiClient
@@ -69,29 +75,38 @@ class XParserPlugin(Star):
             max_bytes=int(self._cfg("stream_max_mb", 100)) * 1024 * 1024
         )
         self.stream_threshold_bytes = int(self._cfg("stream_threshold_mb", 8)) * 1024 * 1024
-        self.transfer_mode = self._normalize_transfer_mode(self._cfg("media_transfer_mode", "auto"))
+        transfer_mode = self._normalize_transfer_mode(self._cfg("media_transfer_mode", "auto"))
         self.enable_auto_parse = bool(self._cfg("enable_auto_parse", True))
         self.tweet_text_template = str(
             self._cfg("tweet_text_template", DEFAULT_TWEET_TEXT_TEMPLATE)
             or DEFAULT_TWEET_TEXT_TEMPLATE
         )
-        self.send_mode = self._normalize_send_mode(self._cfg("send_mode", "普通消息"))
-        self.merge_text_and_images = bool(self._cfg("merge_text_and_images", True))
-        self.max_merged_images = int(self._cfg("max_merged_images", 4))
-        self.cooldown_seconds = max(0, int(self._cfg("cooldown_seconds", 10)))
-        self.same_tweet_cooldown_seconds = max(0, int(self._cfg("same_tweet_cooldown_seconds", 120)))
-        self.acl_mode = self._normalize_acl_mode(self._cfg("acl_mode", "关闭"))
-        self.allowed_group_ids = self._normalize_id_set(self._cfg("allowed_group_ids", []))
-        self.allowed_private_user_ids = self._normalize_id_set(
-            self._cfg("allowed_private_user_ids", [])
+        self.access_control = AccessControl(
+            AccessControlConfig(
+                cooldown_seconds=max(0, int(self._cfg("cooldown_seconds", 10))),
+                same_tweet_cooldown_seconds=max(
+                    0, int(self._cfg("same_tweet_cooldown_seconds", 120))
+                ),
+                acl_mode=normalize_acl_mode(self._cfg("acl_mode", "关闭")),
+                allowed_group_ids=normalize_id_set(self._cfg("allowed_group_ids", [])),
+                allowed_private_user_ids=normalize_id_set(
+                    self._cfg("allowed_private_user_ids", [])
+                ),
+                blocked_group_ids=normalize_id_set(self._cfg("blocked_group_ids", [])),
+                blocked_private_user_ids=normalize_id_set(
+                    self._cfg("blocked_private_user_ids", [])
+                ),
+            )
         )
-        self.blocked_group_ids = self._normalize_id_set(self._cfg("blocked_group_ids", []))
-        self.blocked_private_user_ids = self._normalize_id_set(
-            self._cfg("blocked_private_user_ids", [])
+        self.sender = OneBotNapCatSender(
+            self.stream_client,
+            transfer_mode=transfer_mode,
+            stream_threshold_bytes=self.stream_threshold_bytes,
+            send_mode=self._normalize_send_mode(self._cfg("send_mode", "普通消息")),
+            merge_text_and_images=bool(self._cfg("merge_text_and_images", True)),
+            max_merged_images=int(self._cfg("max_merged_images", 4)),
+            send_video_as_file=bool(self._cfg("send_video_as_file", True)),
         )
-        self._session_last_parse_at: dict[str, float] = {}
-        self._session_tweet_last_parse_at: dict[tuple[str, str], float] = {}
-        self.send_video_as_file = bool(self._cfg("send_video_as_file", True))
         self.cache_ttl_hours = int(self._cfg("cache_ttl_hours", 24))
         self.cache_dir: Path = StarTools.get_data_dir("astrbot_plugin_xparser")
         self.image_dir = self.cache_dir / "images"
@@ -137,68 +152,10 @@ class XParserPlugin(Star):
         *,
         silent: bool,
     ) -> bool:
-        if not self._is_acl_allowed(event):
-            if not silent:
-                await event.send(event.chain_result([Plain("当前会话不在 XParser 允许解析范围内。")]))
-            return False
-
-        wait_seconds = self._cooldown_wait_seconds(event, tweet_id)
-        if wait_seconds > 0:
-            if not silent:
-                await event.send(event.chain_result([Plain(f"解析冷却中，请 {wait_seconds} 秒后再试。")]))
-            return False
-
-        session_key = self._session_key(event)
-        now = time.time()
-        self._session_last_parse_at[session_key] = now
-        self._session_tweet_last_parse_at[(session_key, tweet_id)] = now
-        return True
-
-    def _cooldown_wait_seconds(self, event: AstrMessageEvent, tweet_id: str) -> int:
-        session_key = self._session_key(event)
-        now = time.time()
-        waits: list[float] = []
-
-        if self.cooldown_seconds > 0:
-            last_parse_at = self._session_last_parse_at.get(session_key)
-            if last_parse_at is not None:
-                waits.append(last_parse_at + self.cooldown_seconds - now)
-
-        if self.same_tweet_cooldown_seconds > 0:
-            last_tweet_parse_at = self._session_tweet_last_parse_at.get((session_key, tweet_id))
-            if last_tweet_parse_at is not None:
-                waits.append(last_tweet_parse_at + self.same_tweet_cooldown_seconds - now)
-
-        return max(0, int(max(waits, default=0) + 0.999))
-
-    def _is_acl_allowed(self, event: AstrMessageEvent) -> bool:
-        if self.acl_mode == "off":
-            return True
-
-        group_id = self._safe_id(event.get_group_id())
-        user_id = self._safe_id(event.get_sender_id())
-        is_group = bool(group_id)
-
-        if is_group:
-            allowed_ids = self.allowed_group_ids
-            blocked_ids = self.blocked_group_ids
-            target_id = group_id
-        else:
-            allowed_ids = self.allowed_private_user_ids
-            blocked_ids = self.blocked_private_user_ids
-            target_id = user_id
-
-        if self.acl_mode == "whitelist":
-            return not allowed_ids or target_id in allowed_ids
-        if self.acl_mode == "blacklist":
-            return target_id not in blocked_ids
-        return True
-
-    def _session_key(self, event: AstrMessageEvent) -> str:
-        group_id = self._safe_id(event.get_group_id())
-        if group_id:
-            return f"group:{group_id}"
-        return f"private:{self._safe_id(event.get_sender_id())}"
+        allowed, reason = self.access_control.check(event, tweet_id)
+        if not allowed and not silent and reason:
+            await event.send(event.chain_result([Plain(reason)]))
+        return allowed
 
     async def _parse_and_send(self, event: AstrMessageEvent, tweet_id: str) -> None:
         try:
@@ -318,84 +275,7 @@ class XParserPlugin(Star):
             await event.send(event.chain_result([Plain(text)]))
             return
 
-        if self.send_mode == "forward" and (image_paths or videos):
-            if await self._send_forward_message(event, text, image_paths, len(videos)):
-                pass
-            else:
-                logger.warning("Forward message send failed or unsupported, falling back to normal message mode")
-                await self._send_ordinary_tweet_message(
-                    event,
-                    text,
-                    image_paths,
-                    prefer_merged=self.merge_text_and_images,
-                )
-        else:
-            await self._send_ordinary_tweet_message(
-                event,
-                text,
-                image_paths,
-                prefer_merged=self.merge_text_and_images,
-            )
-
-        for video_path, source_url in videos:
-            await self._send_video(event, video_path, source_url)
-
-    async def _send_ordinary_tweet_message(
-        self,
-        event: AstrMessageEvent,
-        text: str,
-        image_paths: list[Path],
-        *,
-        prefer_merged: bool,
-    ) -> None:
-        if image_paths:
-            if prefer_merged:
-                await self._send_text_with_images(event, text, image_paths)
-            else:
-                await event.send(event.chain_result([Plain(text)]))
-                await self._send_images(event, image_paths)
-            return
-
-        await event.send(event.chain_result([Plain(text)]))
-
-    async def _send_forward_message(
-        self,
-        event: AstrMessageEvent,
-        text: str,
-        image_paths: list[Path],
-        video_count: int,
-    ) -> bool:
-        if not NapCatStreamClient.is_aiocqhttp_event(event):
-            return False
-
-        nodes: list[dict[str, Any]] = [self._forward_node([self._plain_segment(text)])]
-        for index, path in enumerate(image_paths, start=1):
-            nodes.append(
-                self._forward_node(
-                    [
-                        self._plain_segment(f"图片 {index}/{len(image_paths)}"),
-                        self._image_segment(path),
-                    ]
-                )
-            )
-
-        if video_count:
-            nodes.append(
-                self._forward_node(
-                    [
-                        self._plain_segment(
-                            f"视频/GIF 共 {video_count} 个，将在合并转发消息后单独发送。"
-                        )
-                    ]
-                )
-            )
-
-        try:
-            await self._send_onebot_forward(event, nodes)
-            return True
-        except Exception as exc:
-            logger.warning(f"OneBot forward message send failed: {exc}")
-            return False
+        await self.sender.send_tweet_media(event, text, image_paths, videos)
 
     async def _download_image(self, tweet_id: str, url: str) -> Path | None:
         try:
@@ -410,123 +290,6 @@ class XParserPlugin(Star):
             logger.warning(f"Image media download failed: {url} - {exc}")
             return None
 
-    async def _send_text_with_images(
-        self,
-        event: AstrMessageEvent,
-        text: str,
-        image_paths: list[Path],
-    ) -> None:
-        if not image_paths:
-            await event.send(event.chain_result([Plain(text)]))
-            return
-
-        merge_count = max(0, min(self.max_merged_images, len(image_paths)))
-        merged_paths = image_paths[:merge_count]
-        remaining_paths = image_paths[merge_count:]
-
-        if NapCatStreamClient.is_aiocqhttp_event(event):
-            await self._send_onebot_message(
-                event,
-                [self._plain_segment(text), *[self._image_segment(path) for path in merged_paths]],
-            )
-        else:
-            components = [Plain(text), *[Image.fromFileSystem(str(path)) for path in merged_paths]]
-            await event.send(event.chain_result(components))
-
-        if remaining_paths:
-            await self._send_images(event, remaining_paths)
-
-    async def _send_images(
-        self,
-        event: AstrMessageEvent,
-        image_paths: list[Path],
-    ) -> None:
-        if NapCatStreamClient.is_aiocqhttp_event(event):
-            for path in image_paths:
-                try:
-                    await self._send_onebot_message(event, [self._image_segment(path)])
-                except Exception as exc:
-                    logger.warning(f"OneBot base64 image send failed: {path} - {exc}")
-                    await event.send(event.chain_result([Plain(f"图片发送失败：{path.name}")]))
-            return
-
-        image_components = [Image.fromFileSystem(str(path)) for path in image_paths]
-        await event.send(event.chain_result(image_components))
-
-    async def _send_onebot_message(
-        self,
-        event: AstrMessageEvent,
-        message: list[dict[str, Any]],
-    ) -> None:
-        bot = getattr(event, "bot", None)
-        if bot is None:
-            await event.send(
-                event.chain_result([Plain("消息发送失败：当前 aiocqhttp 事件没有可用的 bot 客户端。")])
-            )
-            return
-
-        group_id = event.get_group_id()
-        user_id = event.get_sender_id()
-        if group_id:
-            await self._call_onebot_action(
-                bot,
-                "send_group_msg",
-                group_id=int(group_id),
-                message=message,
-            )
-        else:
-            await self._call_onebot_action(
-                bot,
-                "send_private_msg",
-                user_id=int(user_id),
-                message=message,
-            )
-
-    async def _send_onebot_forward(
-        self,
-        event: AstrMessageEvent,
-        messages: list[dict[str, Any]],
-    ) -> None:
-        bot = getattr(event, "bot", None)
-        if bot is None:
-            raise RuntimeError("当前 aiocqhttp 事件没有可用的 bot 客户端")
-
-        group_id = event.get_group_id()
-        user_id = event.get_sender_id()
-        if group_id:
-            await self._call_onebot_action(
-                bot,
-                "send_group_forward_msg",
-                group_id=int(group_id),
-                messages=messages,
-            )
-        else:
-            await self._call_onebot_action(
-                bot,
-                "send_private_forward_msg",
-                user_id=int(user_id),
-                messages=messages,
-            )
-
-    def _forward_node(self, content: list[dict[str, Any]]) -> dict[str, Any]:
-        return {
-            "type": "node",
-            "data": {
-                "name": "XParser",
-                "uin": "10000",
-                "content": content,
-            },
-        }
-
-    @staticmethod
-    def _plain_segment(text: str) -> dict[str, Any]:
-        return {"type": "text", "data": {"text": text}}
-
-    @staticmethod
-    def _image_segment(path: Path) -> dict[str, Any]:
-        encoded = base64.b64encode(path.read_bytes()).decode("ascii")
-        return {"type": "image", "data": {"file": f"base64://{encoded}"}}
-
     async def _download_video(self, tweet_id: str, url: str) -> Path | None:
         try:
             data = await self.media_processor.download_media(url)
@@ -539,56 +302,10 @@ class XParserPlugin(Star):
             logger.warning(f"Video media download failed: {url} - {exc}")
             return None
 
-    async def _send_video(self, event: AstrMessageEvent, path: Path, source_url: str) -> None:
-        use_stream = self.transfer_mode == "stream" or (
-            self.transfer_mode == "auto" and path.stat().st_size >= self.stream_threshold_bytes
-        )
-
-        if use_stream or self.transfer_mode == "stream":
-            if await self.stream_client.upload_stream_then_send_video(
-                event,
-                path,
-                allow_file_fallback=self.send_video_as_file,
-            ):
-                return
-            if self.transfer_mode == "stream":
-                await event.send(event.chain_result([Plain(f"Stream API 上传失败，原始直链：{source_url}")]))
-                return
-
-        try:
-            if self.transfer_mode in ("auto", "local"):
-                await event.send(event.chain_result([Video.fromFileSystem(str(path))]))
-                return
-        except Exception as exc:
-            logger.warning(f"Video component send failed, trying stream fallback: {source_url} - {exc}")
-
-        if await self.stream_client.upload_stream_then_send_video(
-            event,
-            path,
-            allow_file_fallback=self.send_video_as_file,
-        ):
-            return
-
-        await event.send(event.chain_result([Plain(f"视频发送失败，原始直链：{source_url}")]))
-
     @staticmethod
     def _extract_tweet_id(text: str) -> str | None:
         match = TWEET_URL_PATTERN.search(text or "")
         return match.group(1) if match else None
-
-    @staticmethod
-    async def _call_onebot_action(bot: Any, action: str, **payload: Any) -> Any:
-        direct = getattr(bot, action, None)
-        if direct is not None:
-            return await direct(**payload)
-
-        for method_name in ("call_action", "call_api", "api"):
-            caller = getattr(bot, method_name, None)
-            if caller is None:
-                continue
-            return await caller(action, **payload)
-
-        raise RuntimeError(f"当前 OneBot 客户端不支持动作 {action}")
 
     @staticmethod
     def _normalize_transfer_mode(value: Any) -> str:
@@ -614,40 +331,6 @@ class XParserPlugin(Star):
             return normalized
         logger.warning(f"未知发送模式 {value!r}，已回退为普通消息")
         return "normal"
-
-    @staticmethod
-    def _normalize_acl_mode(value: Any) -> str:
-        mode = str(value or "关闭").strip().lower()
-        aliases = {
-            "关闭": "off",
-            "off": "off",
-            "白名单": "whitelist",
-            "whitelist": "whitelist",
-            "黑名单": "blacklist",
-            "blacklist": "blacklist",
-        }
-        normalized = aliases.get(mode, mode)
-        if normalized in {"off", "whitelist", "blacklist"}:
-            return normalized
-        logger.warning(f"未知访问控制模式 {value!r}，已回退为关闭")
-        return "off"
-
-    @staticmethod
-    def _normalize_id_set(value: Any) -> set[str]:
-        if value is None:
-            return set()
-        if isinstance(value, (str, int)):
-            values = [value]
-        else:
-            try:
-                values = list(value)
-            except TypeError:
-                values = [value]
-        return {str(item).strip() for item in values if str(item).strip()}
-
-    @staticmethod
-    def _safe_id(value: Any) -> str:
-        return str(value or "").strip()
 
     def _cleanup_cache(self) -> None:
         if self.cache_ttl_hours <= 0:
