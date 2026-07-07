@@ -40,6 +40,7 @@ All notable changes to this project will be documented in this file.
 - Video transfer now prioritizes Stream API video message delivery before file fallback.
 - README expanded with architecture, configuration, troubleshooting, and roadmap notes.
 - Split access control and QQ/OneBot/NapCat message sending into dedicated modules for easier future platform adapters.
+- Grouped AstrBot WebUI settings by function, including authentication, parsing, sending, media processing, access control, and network settings.
 
 ### Known Issues
 

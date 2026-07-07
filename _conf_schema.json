@@ -1,225 +1,317 @@
 {
-  "api_bearer_token": {
-    "description": "X API Bearer Token（推荐填写）",
-    "type": "string",
-    "hint": "X/Twitter 开发者后台里的 Bearer Token，用来读取公开推文。只填这个通常就可以解析文字、图片和视频信息；如果你同时填写 OAuth 1.0a 四件套，会优先使用 OAuth 1.0a。",
-    "default": "",
-    "is_sensitive": true
+  "auth": {
+    "description": "认证设置",
+    "type": "object",
+    "hint": "填写 X/Twitter API 或 Cookie 降级解析所需的凭据。不懂 OAuth 的话，优先填写 Bearer Token；API 额度不足时再填写 auth_token 和 ct0。",
+    "items": {
+      "api_bearer_token": {
+        "description": "X API Bearer Token（推荐填写）",
+        "type": "string",
+        "hint": "X/Twitter 开发者后台里的 Bearer Token，用来读取公开推文。只填这个通常就可以解析文字、图片和视频信息；如果你同时填写 OAuth 1.0a 四件套，会优先使用 OAuth 1.0a。",
+        "default": "",
+        "is_sensitive": true
+      },
+      "api_key": {
+        "description": "Consumer Key / API Key（可选）",
+        "type": "string",
+        "hint": "OAuth 1.0a 认证用的 Consumer Key。需要和 Consumer Secret、Access Token、Access Token Secret 四项一起填写才会生效；不懂可以先留空。",
+        "default": "",
+        "is_sensitive": true
+      },
+      "api_key_secret": {
+        "description": "Consumer Secret / API Secret（可选）",
+        "type": "string",
+        "hint": "OAuth 1.0a 认证用的 Consumer Secret。需要和另外三项 OAuth 凭据一起填写；不懂可以先留空。",
+        "default": "",
+        "is_sensitive": true
+      },
+      "oauth_access_token": {
+        "description": "Access Token（可选）",
+        "type": "string",
+        "hint": "OAuth 1.0a 认证用的 Access Token。需要和 Consumer Key、Consumer Secret、Access Token Secret 一起填写；不懂可以先留空。",
+        "default": "",
+        "is_sensitive": true
+      },
+      "oauth_access_token_secret": {
+        "description": "Access Token Secret（可选）",
+        "type": "string",
+        "hint": "OAuth 1.0a 认证用的 Access Token Secret。需要和另外三项 OAuth 凭据一起填写；不懂可以先留空。",
+        "default": "",
+        "is_sensitive": true
+      },
+      "cookie_auth_token": {
+        "description": "Cookie 降级认证：auth_token（可选）",
+        "type": "string",
+        "hint": "当官方 X API 权限不足或额度用尽时，可用网页登录 Cookie 作为降级解析。auth_token 等同账号登录凭据，请不要泄露；需要和 ct0 同时填写才生效。",
+        "default": "",
+        "is_sensitive": true
+      },
+      "cookie_ct0": {
+        "description": "Cookie 降级认证：ct0（可选）",
+        "type": "string",
+        "hint": "Twitter/X 网页端的 CSRF Token，需要和 auth_token 同时填写。ct0 会定期变化，如果降级解析突然 401/403，需要重新获取。",
+        "default": "",
+        "is_sensitive": true
+      },
+      "graphql_tweet_query_id": {
+        "description": "GraphQL 推文查询 ID（一般留空）",
+        "type": "string",
+        "hint": "Cookie 降级解析单条推文时使用。留空会使用内置默认值；只有日志提示 TweetResultByRestId queryId 失效时，才需要从浏览器开发者工具里抓新的 queryId 填到这里。",
+        "default": ""
+      }
+    }
   },
-  "api_key": {
-    "description": "Consumer Key / API Key（可选）",
-    "type": "string",
-    "hint": "OAuth 1.0a 认证用的 Consumer Key。需要和 Consumer Secret、Access Token、Access Token Secret 四项一起填写才会生效；不懂可以先留空。",
-    "default": "",
-    "is_sensitive": true
+  "parse": {
+    "description": "解析设置",
+    "type": "object",
+    "hint": "控制是否自动识别推文链接，以及推文文字摘要的输出格式。",
+    "items": {
+      "enable_auto_parse": {
+        "description": "自动解析聊天里的推文链接",
+        "type": "bool",
+        "hint": "开启后，群聊或私聊里出现 x.com/twitter.com 的推文链接时会自动解析。关闭后只能用 /xparse <推文链接> 手动解析。",
+        "default": true
+      },
+      "tweet_text_template": {
+        "description": "推文文字输出模板",
+        "type": "text",
+        "hint": "自定义推文摘要的文字格式。可用占位符：{author}、{author_name}、{author_username}、{tweet_id}、{text}、{created_at}、{like_count}、{retweet_count}、{reply_count}、{metrics_line}、{media_summary}、{media_summary_line}、{url}。写错占位符会自动回退默认模板。",
+        "default": "{author}\n\n{text}\n\n时间：{created_at}{metrics_line}{media_summary_line}\n链接：{url}"
+      }
+    }
   },
-  "api_key_secret": {
-    "description": "Consumer Secret / API Secret（可选）",
-    "type": "string",
-    "hint": "OAuth 1.0a 认证用的 Consumer Secret。需要和另外三项 OAuth 凭据一起填写；不懂可以先留空。",
-    "default": "",
-    "is_sensitive": true
+  "send": {
+    "description": "发送设置",
+    "type": "object",
+    "hint": "控制消息发送样式、图文是否合并、视频是否走 NapCat Stream API，以及视频失败时是否用文件兜底。",
+    "items": {
+      "media_transfer_mode": {
+        "description": "媒体传输模式",
+        "type": "string",
+        "hint": "推荐 auto。auto：小视频先走普通消息，较大视频或发送失败时走 NapCat Stream API；stream：视频强制走 Stream API，适合 AstrBot 和 NapCat 在不同容器且没有共享目录；local：只走本地文件路径，不适合双容器无共享目录部署。",
+        "default": "auto",
+        "options": [
+          "auto",
+          "stream",
+          "local"
+        ]
+      },
+      "send_mode": {
+        "description": "发送样式",
+        "type": "string",
+        "hint": "普通消息：按普通 QQ 消息发送；合并转发：尝试发送 QQ 合并聊天记录，失败时自动退回普通消息。图片是否和文字合并由下面的“合并发送文字和图片”开关单独控制。",
+        "default": "普通消息",
+        "options": [
+          "普通消息",
+          "合并转发"
+        ]
+      },
+      "merge_text_and_images": {
+        "description": "合并发送文字和图片",
+        "type": "bool",
+        "hint": "开启后，在“普通消息”样式下会尽量把推文文字和图片放进同一条消息；关闭后会先发文字，再逐张发图片。合并转发样式发送失败并回退到普通消息时，也会遵守这个开关。",
+        "default": true
+      },
+      "max_merged_images": {
+        "description": "单条图文消息最多合并图片数",
+        "type": "int",
+        "hint": "当合并发送开启时，最多把多少张图片和文字放在同一条消息里。超过数量的图片会继续单独发送。建议 4。",
+        "default": 4,
+        "slider": {
+          "min": 1,
+          "max": 9,
+          "step": 1
+        }
+      },
+      "stream_threshold_mb": {
+        "description": "自动模式下启用 Stream API 的视频大小阈值（MB）",
+        "type": "int",
+        "hint": "仅媒体传输模式为 auto 时生效。视频文件大于等于这个大小时，优先使用 NapCat Stream API。双容器部署建议保持 8MB 或更小。",
+        "default": 8,
+        "slider": {
+          "min": 1,
+          "max": 100,
+          "step": 1
+        }
+      },
+      "stream_max_mb": {
+        "description": "Stream API 最大上传大小（MB）",
+        "type": "int",
+        "hint": "NapCat 普通视频/文件链路通常有体积限制，这里默认 100MB。超过此大小会停止上传并退化为原始链接，避免插件卡死。",
+        "default": 100,
+        "slider": {
+          "min": 1,
+          "max": 100,
+          "step": 1
+        }
+      },
+      "send_video_as_file": {
+        "description": "视频消息失败时允许文件兜底",
+        "type": "bool",
+        "hint": "开启后，插件会优先把 Stream API 上传后的文件作为视频消息发送；如果视频消息仍失败，再改为群文件/私聊文件。建议开启。",
+        "default": true
+      }
+    }
   },
-  "oauth_access_token": {
-    "description": "Access Token（可选）",
-    "type": "string",
-    "hint": "OAuth 1.0a 认证用的 Access Token。需要和 Consumer Key、Consumer Secret、Access Token Secret 一起填写；不懂可以先留空。",
-    "default": "",
-    "is_sensitive": true
+  "media": {
+    "description": "媒体处理",
+    "type": "object",
+    "hint": "控制图片压缩、视频清晰度选择、媒体下载上限和本地缓存清理时间。",
+    "items": {
+      "download_limit_mb": {
+        "description": "媒体下载大小上限（MB）",
+        "type": "int",
+        "hint": "插件会先把 X/Twitter 媒体下载到 AstrBot 容器临时缓存，再传给 NapCat。超过这个大小的媒体不会下载，避免占用过多内存和磁盘。",
+        "default": 100,
+        "slider": {
+          "min": 1,
+          "max": 100,
+          "step": 1
+        }
+      },
+      "enable_image_compression": {
+        "description": "启用图片压缩",
+        "type": "bool",
+        "hint": "开启后，插件会使用 Pillow/PIL 对图片进行压缩。关闭后会尽量发送原图，但大图可能发送更慢或失败。",
+        "default": true
+      },
+      "image_compress_mode": {
+        "description": "图片压缩方式",
+        "type": "string",
+        "hint": "target_size：按目标大小压缩，会尽量压到指定 KB 以内；quality：按固定质量压缩，不强求目标体积。默认 target_size。",
+        "default": "target_size",
+        "options": [
+          "target_size",
+          "quality"
+        ]
+      },
+      "image_compress_quality": {
+        "description": "图片压缩质量（1-100）",
+        "type": "int",
+        "hint": "数值越高画质越好、体积越大。target_size 模式下这是质量上限；quality 模式下这是固定质量。推荐 85。",
+        "default": 85,
+        "slider": {
+          "min": 1,
+          "max": 100,
+          "step": 1
+        }
+      },
+      "image_compress_target_kb": {
+        "description": "图片压缩目标大小（KB）",
+        "type": "int",
+        "hint": "仅图片压缩方式为 target_size 时生效。图片过大时会压缩到接近这个大小再发送。填 0 表示不按目标大小压缩。",
+        "default": 2048,
+        "slider": {
+          "min": 0,
+          "max": 8192,
+          "step": 256
+        }
+      },
+      "video_variant_strategy": {
+        "description": "视频质量选择策略",
+        "type": "string",
+        "hint": "当前不会用 ffmpeg 重新压缩视频，而是在 X/Twitter 提供的 MP4 清晰度里选择。highest：最高画质；balanced：中等画质；lowest：最低体积。默认 highest。",
+        "default": "highest",
+        "options": [
+          "highest",
+          "balanced",
+          "lowest"
+        ]
+      },
+      "cache_ttl_hours": {
+        "description": "本地缓存保留时间（小时）",
+        "type": "int",
+        "hint": "下载的图片和视频会临时保存在 AstrBot 容器内，超过这个时间会在插件启动或重载时自动清理。默认 24 小时。",
+        "default": 24,
+        "slider": {
+          "min": 1,
+          "max": 168,
+          "step": 1
+        }
+      }
+    }
   },
-  "oauth_access_token_secret": {
-    "description": "Access Token Secret（可选）",
-    "type": "string",
-    "hint": "OAuth 1.0a 认证用的 Access Token Secret。需要和另外三项 OAuth 凭据一起填写；不懂可以先留空。",
-    "default": "",
-    "is_sensitive": true
+  "access": {
+    "description": "冷却与访问控制",
+    "type": "object",
+    "hint": "控制解析频率，以及哪些群聊或私聊用户可以使用插件。",
+    "items": {
+      "cooldown_seconds": {
+        "description": "同一会话解析冷却（秒）",
+        "type": "int",
+        "hint": "同一个群聊或同一个私聊，两次解析之间至少间隔多少秒。自动解析触发冷却时会静默忽略，手动 /xparse 触发冷却时会提示剩余秒数。填 0 表示不限制。",
+        "default": 10,
+        "slider": {
+          "min": 0,
+          "max": 300,
+          "step": 1
+        }
+      },
+      "same_tweet_cooldown_seconds": {
+        "description": "同一推文重复解析冷却（秒）",
+        "type": "int",
+        "hint": "同一个群聊或同一个私聊里，重复解析同一条推文需要间隔多少秒。用于避免群里反复贴同一个链接刷屏。填 0 表示不限制。",
+        "default": 120,
+        "slider": {
+          "min": 0,
+          "max": 3600,
+          "step": 10
+        }
+      },
+      "acl_mode": {
+        "description": "访问控制模式",
+        "type": "string",
+        "hint": "关闭：所有群聊和私聊都允许使用；白名单：只允许白名单里的群号/用户 QQ 使用，名单为空时不限制；黑名单：禁止黑名单里的群号/用户 QQ 使用。",
+        "default": "关闭",
+        "options": [
+          "关闭",
+          "白名单",
+          "黑名单"
+        ]
+      },
+      "allowed_group_ids": {
+        "description": "群聊白名单",
+        "type": "list",
+        "hint": "访问控制模式为白名单时生效。填写允许使用 XParser 的群号，例如 123456789。留空表示不限制群聊。",
+        "default": []
+      },
+      "allowed_private_user_ids": {
+        "description": "私聊白名单",
+        "type": "list",
+        "hint": "访问控制模式为白名单时生效。填写允许私聊使用 XParser 的用户 QQ。留空表示不限制私聊。",
+        "default": []
+      },
+      "blocked_group_ids": {
+        "description": "群聊黑名单",
+        "type": "list",
+        "hint": "访问控制模式为黑名单时生效。填写禁止使用 XParser 的群号。",
+        "default": []
+      },
+      "blocked_private_user_ids": {
+        "description": "私聊黑名单",
+        "type": "list",
+        "hint": "访问控制模式为黑名单时生效。填写禁止私聊使用 XParser 的用户 QQ。",
+        "default": []
+      }
+    }
   },
-  "cookie_auth_token": {
-    "description": "Cookie 降级认证：auth_token（可选）",
-    "type": "string",
-    "hint": "当官方 X API 权限不足或额度用尽时，可用网页登录 Cookie 作为降级解析。auth_token 等同账号登录凭据，请不要泄露；需要和 ct0 同时填写才生效。",
-    "default": "",
-    "is_sensitive": true
-  },
-  "cookie_ct0": {
-    "description": "Cookie 降级认证：ct0（可选）",
-    "type": "string",
-    "hint": "Twitter/X 网页端的 CSRF Token，需要和 auth_token 同时填写。ct0 会定期变化，如果降级解析突然 401/403，需要重新获取。",
-    "default": "",
-    "is_sensitive": true
-  },
-  "graphql_tweet_query_id": {
-    "description": "GraphQL 推文查询 ID（一般留空）",
-    "type": "string",
-    "hint": "Cookie 降级解析单条推文时使用。留空会使用内置默认值；只有日志提示 TweetResultByRestId queryId 失效时，才需要从浏览器开发者工具里抓新的 queryId 填到这里。",
-    "default": ""
-  },
-  "enable_auto_parse": {
-    "description": "自动解析聊天里的推文链接",
-    "type": "bool",
-    "hint": "开启后，群聊或私聊里出现 x.com/twitter.com 的推文链接时会自动解析。关闭后只能用 /xparse <推文链接> 手动解析。",
-    "default": true
-  },
-  "cooldown_seconds": {
-    "description": "同一会话解析冷却（秒）",
-    "type": "int",
-    "hint": "同一个群聊或同一个私聊，两次解析之间至少间隔多少秒。自动解析触发冷却时会静默忽略，手动 /xparse 触发冷却时会提示剩余秒数。填 0 表示不限制。",
-    "default": 10,
-    "slider": { "min": 0, "max": 300, "step": 1 }
-  },
-  "same_tweet_cooldown_seconds": {
-    "description": "同一推文重复解析冷却（秒）",
-    "type": "int",
-    "hint": "同一个群聊或同一个私聊里，重复解析同一条推文需要间隔多少秒。用于避免群里反复贴同一个链接刷屏。填 0 表示不限制。",
-    "default": 120,
-    "slider": { "min": 0, "max": 3600, "step": 10 }
-  },
-  "acl_mode": {
-    "description": "访问控制模式",
-    "type": "string",
-    "hint": "关闭：所有群聊和私聊都允许使用；白名单：只允许白名单里的群号/用户 QQ 使用，名单为空时不限制；黑名单：禁止黑名单里的群号/用户 QQ 使用。",
-    "default": "关闭",
-    "options": [
-      "关闭",
-      "白名单",
-      "黑名单"
-    ]
-  },
-  "allowed_group_ids": {
-    "description": "群聊白名单",
-    "type": "list",
-    "hint": "访问控制模式为白名单时生效。填写允许使用 XParser 的群号，例如 123456789。留空表示不限制群聊。",
-    "default": []
-  },
-  "allowed_private_user_ids": {
-    "description": "私聊白名单",
-    "type": "list",
-    "hint": "访问控制模式为白名单时生效。填写允许私聊使用 XParser 的用户 QQ。留空表示不限制私聊。",
-    "default": []
-  },
-  "blocked_group_ids": {
-    "description": "群聊黑名单",
-    "type": "list",
-    "hint": "访问控制模式为黑名单时生效。填写禁止使用 XParser 的群号。",
-    "default": []
-  },
-  "blocked_private_user_ids": {
-    "description": "私聊黑名单",
-    "type": "list",
-    "hint": "访问控制模式为黑名单时生效。填写禁止私聊使用 XParser 的用户 QQ。",
-    "default": []
-  },
-  "tweet_text_template": {
-    "description": "推文文字输出模板",
-    "type": "text",
-    "hint": "自定义推文摘要的文字格式。可用占位符：{author}、{author_name}、{author_username}、{tweet_id}、{text}、{created_at}、{like_count}、{retweet_count}、{reply_count}、{metrics_line}、{media_summary}、{media_summary_line}、{url}。写错占位符会自动回退默认模板。",
-    "default": "{author}\n\n{text}\n\n时间：{created_at}{metrics_line}{media_summary_line}\n链接：{url}"
-  },
-  "media_transfer_mode": {
-    "description": "媒体传输模式",
-    "type": "string",
-    "hint": "推荐填 auto。auto：小视频先走普通消息，较大视频或发送失败时走 NapCat Stream API；stream：视频强制走 Stream API，适合 AstrBot 和 NapCat 在不同容器且没有共享目录；local：只走本地文件路径，不适合你的双容器无共享目录部署。",
-    "default": "auto"
-  },
-  "send_mode": {
-    "description": "发送样式",
-    "type": "string",
-    "hint": "普通消息：按普通 QQ 消息发送；合并转发：尝试发送 QQ 合并聊天记录，失败时自动退回普通消息。图片是否和文字合并由下面的“合并发送文字和图片”开关单独控制。",
-    "default": "普通消息",
-    "options": [
-      "普通消息",
-      "合并转发"
-    ]
-  },
-  "merge_text_and_images": {
-    "description": "合并发送文字和图片",
-    "type": "bool",
-    "hint": "开启后，在“普通消息”样式下会尽量把推文文字和图片放进同一条消息；关闭后会先发文字，再逐张发图片。合并转发样式发送失败并回退到普通消息时，也会遵守这个开关。",
-    "default": true
-  },
-  "max_merged_images": {
-    "description": "单条图文消息最多合并图片数",
-    "type": "int",
-    "hint": "当合并发送开启时，最多把多少张图片和文字放在同一条消息里。超过数量的图片会继续单独发送。建议 4。",
-    "default": 4,
-    "slider": { "min": 1, "max": 9, "step": 1 }
-  },
-  "stream_threshold_mb": {
-    "description": "自动模式下启用 Stream API 的视频大小阈值（MB）",
-    "type": "int",
-    "hint": "仅 media_transfer_mode=auto 时生效。视频文件大于等于这个大小时，优先使用 NapCat Stream API。你的部署建议保持 8MB 或更小。",
-    "default": 8,
-    "slider": { "min": 1, "max": 100, "step": 1 }
-  },
-  "stream_max_mb": {
-    "description": "Stream API 最大上传大小（MB）",
-    "type": "int",
-    "hint": "NapCat 普通视频/文件链路通常有体积限制，这里默认 100MB。超过此大小会停止上传并退化为原始链接，避免插件卡死。",
-    "default": 100,
-    "slider": { "min": 1, "max": 100, "step": 1 }
-  },
-  "download_limit_mb": {
-    "description": "媒体下载大小上限（MB）",
-    "type": "int",
-    "hint": "插件会先把 X/Twitter 媒体下载到 AstrBot 容器临时缓存，再传给 NapCat。超过这个大小的媒体不会下载，避免占用过多内存和磁盘。",
-    "default": 100,
-    "slider": { "min": 1, "max": 100, "step": 1 }
-  },
-  "send_video_as_file": {
-    "description": "视频消息失败时允许文件兜底",
-    "type": "bool",
-    "hint": "开启后，插件会优先把 Stream API 上传后的文件作为视频消息发送；如果视频消息仍失败，再改为群文件/私聊文件。建议开启。",
-    "default": true
-  },
-  "enable_image_compression": {
-    "description": "启用图片压缩",
-    "type": "bool",
-    "hint": "开启后，插件会使用 Pillow/PIL 对图片进行压缩。关闭后会尽量发送原图，但大图可能发送更慢或失败。",
-    "default": true
-  },
-  "image_compress_mode": {
-    "description": "图片压缩方式",
-    "type": "string",
-    "hint": "target_size：按目标大小压缩，会尽量压到指定 KB 以内；quality：按固定质量压缩，不强求目标体积。默认 target_size。",
-    "default": "target_size"
-  },
-  "image_compress_quality": {
-    "description": "图片压缩质量（1-100）",
-    "type": "int",
-    "hint": "数值越高画质越好、体积越大。target_size 模式下这是质量上限；quality 模式下这是固定质量。推荐 85。",
-    "default": 85,
-    "slider": { "min": 1, "max": 100, "step": 1 }
-  },
-  "image_compress_target_kb": {
-    "description": "图片压缩目标大小（KB）",
-    "type": "int",
-    "hint": "仅 image_compress_mode=target_size 时生效。图片过大时会压缩到接近这个大小再发送。填 0 表示不按目标大小压缩。",
-    "default": 2048,
-    "slider": { "min": 0, "max": 8192, "step": 256 }
-  },
-  "video_variant_strategy": {
-    "description": "视频质量选择策略",
-    "type": "string",
-    "hint": "当前不会用 ffmpeg 重新压缩视频，而是在 X/Twitter 提供的 MP4 清晰度里选择。highest：最高画质；balanced：中等画质；lowest：最低体积。默认 highest。",
-    "default": "highest"
-  },
-  "cache_ttl_hours": {
-    "description": "本地缓存保留时间（小时）",
-    "type": "int",
-    "hint": "下载的图片和视频会临时保存在 AstrBot 容器内，超过这个时间会自动清理。默认 24 小时。",
-    "default": 24,
-    "slider": { "min": 1, "max": 168, "step": 1 }
-  },
-  "enable_proxy": {
-    "description": "启用代理访问 X/Twitter",
-    "type": "bool",
-    "hint": "插件访问 X API 和下载媒体时是否走代理。中国大陆部署通常需要开启。",
-    "default": true
-  },
-  "proxy_url": {
-    "description": "代理地址",
-    "type": "string",
-    "hint": "HTTP 代理地址，例如 http://127.0.0.1:7890。注意：如果 AstrBot 在 Docker 容器里，127.0.0.1 指的是容器内部，不是宿主机；可能需要改成宿主机网关地址或代理容器名。",
-    "default": "http://127.0.0.1:7890"
+  "network": {
+    "description": "网络设置",
+    "type": "object",
+    "hint": "控制访问 X/Twitter API 和下载媒体时是否走代理。",
+    "items": {
+      "enable_proxy": {
+        "description": "启用代理访问 X/Twitter",
+        "type": "bool",
+        "hint": "插件访问 X API 和下载媒体时是否走代理。中国大陆部署通常需要开启。",
+        "default": true
+      },
+      "proxy_url": {
+        "description": "代理地址",
+        "type": "string",
+        "hint": "HTTP 代理地址，例如 http://127.0.0.1:7890。注意：如果 AstrBot 在 Docker 容器里，127.0.0.1 指的是容器内部，不是宿主机；可能需要改成宿主机网关地址或代理容器名。",
+        "default": "http://127.0.0.1:7890"
+      }
+    }
   }
 }

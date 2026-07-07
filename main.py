@@ -49,52 +49,97 @@ class XParserPlugin(Star):
         super().__init__(context)
         self.config = config
         self.api_client = XApiClient(
-            bearer_token=self._cfg("api_bearer_token", ""),
-            api_key=self._cfg("api_key", ""),
-            api_key_secret=self._cfg("api_key_secret", ""),
-            oauth_access_token=self._cfg("oauth_access_token", ""),
-            oauth_access_token_secret=self._cfg("oauth_access_token_secret", ""),
-            cookie_auth_token=self._cfg("cookie_auth_token", ""),
-            cookie_ct0=self._cfg("cookie_ct0", ""),
-            graphql_tweet_query_id=self._cfg("graphql_tweet_query_id", ""),
-            enable_proxy=bool(self._cfg("enable_proxy", True)),
-            proxy_url=self._cfg("proxy_url", "http://127.0.0.1:7890"),
+            bearer_token=self._cfg("auth.api_bearer_token", "", "api_bearer_token"),
+            api_key=self._cfg("auth.api_key", "", "api_key"),
+            api_key_secret=self._cfg("auth.api_key_secret", "", "api_key_secret"),
+            oauth_access_token=self._cfg(
+                "auth.oauth_access_token", "", "oauth_access_token"
+            ),
+            oauth_access_token_secret=self._cfg(
+                "auth.oauth_access_token_secret", "", "oauth_access_token_secret"
+            ),
+            cookie_auth_token=self._cfg(
+                "auth.cookie_auth_token", "", "cookie_auth_token"
+            ),
+            cookie_ct0=self._cfg("auth.cookie_ct0", "", "cookie_ct0"),
+            graphql_tweet_query_id=self._cfg(
+                "auth.graphql_tweet_query_id", "", "graphql_tweet_query_id"
+            ),
+            enable_proxy=bool(self._cfg("network.enable_proxy", True, "enable_proxy")),
+            proxy_url=self._cfg("network.proxy_url", "http://127.0.0.1:7890", "proxy_url"),
         )
         self.media_processor = MediaProcessor(
-            forward_threshold_mb=int(self._cfg("download_limit_mb", 100)),
-            pil_compress_target_kb=int(self._cfg("image_compress_target_kb", 2048)),
-            image_compress_enabled=bool(self._cfg("enable_image_compression", True)),
-            image_compress_mode=self._cfg("image_compress_mode", "target_size"),
-            image_compress_quality=int(self._cfg("image_compress_quality", 85)),
-            video_variant_strategy=self._cfg("video_variant_strategy", "highest"),
+            forward_threshold_mb=int(self._cfg("media.download_limit_mb", 100, "download_limit_mb")),
+            pil_compress_target_kb=int(
+                self._cfg("media.image_compress_target_kb", 2048, "image_compress_target_kb")
+            ),
+            image_compress_enabled=bool(
+                self._cfg("media.enable_image_compression", True, "enable_image_compression")
+            ),
+            image_compress_mode=self._cfg(
+                "media.image_compress_mode", "target_size", "image_compress_mode"
+            ),
+            image_compress_quality=int(
+                self._cfg("media.image_compress_quality", 85, "image_compress_quality")
+            ),
+            video_variant_strategy=self._cfg(
+                "media.video_variant_strategy", "highest", "video_variant_strategy"
+            ),
             display_media_details=True,
-            enable_proxy=bool(self._cfg("enable_proxy", True)),
-            proxy_url=self._cfg("proxy_url", "http://127.0.0.1:7890"),
+            enable_proxy=bool(self._cfg("network.enable_proxy", True, "enable_proxy")),
+            proxy_url=self._cfg("network.proxy_url", "http://127.0.0.1:7890", "proxy_url"),
         )
         self.stream_client = NapCatStreamClient(
-            max_bytes=int(self._cfg("stream_max_mb", 100)) * 1024 * 1024
+            max_bytes=int(self._cfg("send.stream_max_mb", 100, "stream_max_mb")) * 1024 * 1024
         )
-        self.stream_threshold_bytes = int(self._cfg("stream_threshold_mb", 8)) * 1024 * 1024
-        transfer_mode = self._normalize_transfer_mode(self._cfg("media_transfer_mode", "auto"))
-        self.enable_auto_parse = bool(self._cfg("enable_auto_parse", True))
+        self.stream_threshold_bytes = (
+            int(self._cfg("send.stream_threshold_mb", 8, "stream_threshold_mb")) * 1024 * 1024
+        )
+        transfer_mode = self._normalize_transfer_mode(
+            self._cfg("send.media_transfer_mode", "auto", "media_transfer_mode")
+        )
+        self.enable_auto_parse = bool(
+            self._cfg("parse.enable_auto_parse", True, "enable_auto_parse")
+        )
         self.tweet_text_template = str(
-            self._cfg("tweet_text_template", DEFAULT_TWEET_TEXT_TEMPLATE)
+            self._cfg("parse.tweet_text_template", DEFAULT_TWEET_TEXT_TEMPLATE, "tweet_text_template")
             or DEFAULT_TWEET_TEXT_TEMPLATE
         )
         self.access_control = AccessControl(
             AccessControlConfig(
-                cooldown_seconds=max(0, int(self._cfg("cooldown_seconds", 10))),
+                cooldown_seconds=max(
+                    0, int(self._cfg("access.cooldown_seconds", 10, "cooldown_seconds"))
+                ),
                 same_tweet_cooldown_seconds=max(
-                    0, int(self._cfg("same_tweet_cooldown_seconds", 120))
+                    0,
+                    int(
+                        self._cfg(
+                            "access.same_tweet_cooldown_seconds",
+                            120,
+                            "same_tweet_cooldown_seconds",
+                        )
+                    ),
                 ),
-                acl_mode=normalize_acl_mode(self._cfg("acl_mode", "关闭")),
-                allowed_group_ids=normalize_id_set(self._cfg("allowed_group_ids", [])),
+                acl_mode=normalize_acl_mode(self._cfg("access.acl_mode", "关闭", "acl_mode")),
+                allowed_group_ids=normalize_id_set(
+                    self._cfg("access.allowed_group_ids", [], "allowed_group_ids")
+                ),
                 allowed_private_user_ids=normalize_id_set(
-                    self._cfg("allowed_private_user_ids", [])
+                    self._cfg(
+                        "access.allowed_private_user_ids",
+                        [],
+                        "allowed_private_user_ids",
+                    )
                 ),
-                blocked_group_ids=normalize_id_set(self._cfg("blocked_group_ids", [])),
+                blocked_group_ids=normalize_id_set(
+                    self._cfg("access.blocked_group_ids", [], "blocked_group_ids")
+                ),
                 blocked_private_user_ids=normalize_id_set(
-                    self._cfg("blocked_private_user_ids", [])
+                    self._cfg(
+                        "access.blocked_private_user_ids",
+                        [],
+                        "blocked_private_user_ids",
+                    )
                 ),
             )
         )
@@ -102,12 +147,20 @@ class XParserPlugin(Star):
             self.stream_client,
             transfer_mode=transfer_mode,
             stream_threshold_bytes=self.stream_threshold_bytes,
-            send_mode=self._normalize_send_mode(self._cfg("send_mode", "普通消息")),
-            merge_text_and_images=bool(self._cfg("merge_text_and_images", True)),
-            max_merged_images=int(self._cfg("max_merged_images", 4)),
-            send_video_as_file=bool(self._cfg("send_video_as_file", True)),
+            send_mode=self._normalize_send_mode(
+                self._cfg("send.send_mode", "普通消息", "send_mode")
+            ),
+            merge_text_and_images=bool(
+                self._cfg("send.merge_text_and_images", True, "merge_text_and_images")
+            ),
+            max_merged_images=int(
+                self._cfg("send.max_merged_images", 4, "max_merged_images")
+            ),
+            send_video_as_file=bool(
+                self._cfg("send.send_video_as_file", True, "send_video_as_file")
+            ),
         )
-        self.cache_ttl_hours = int(self._cfg("cache_ttl_hours", 24))
+        self.cache_ttl_hours = int(self._cfg("media.cache_ttl_hours", 24, "cache_ttl_hours"))
         self.cache_dir: Path = StarTools.get_data_dir("astrbot_plugin_xparser")
         self.image_dir = self.cache_dir / "images"
         self.video_dir = self.cache_dir / "videos"
@@ -115,9 +168,22 @@ class XParserPlugin(Star):
             directory.mkdir(parents=True, exist_ok=True)
         self._cleanup_cache()
 
-    def _cfg(self, key: str, default: Any) -> Any:
+    def _cfg(self, key: str, default: Any, legacy_key: str | None = None) -> Any:
+        missing = object()
         try:
-            return self.config.get(key, default)
+            current: Any = self.config
+            for part in key.split("."):
+                if not hasattr(current, "get"):
+                    current = missing
+                    break
+                current = current.get(part, missing)
+                if current is missing:
+                    break
+            if current is not missing:
+                return current
+            if legacy_key:
+                return self.config.get(legacy_key, default)
+            return default
         except AttributeError:
             return default
 
