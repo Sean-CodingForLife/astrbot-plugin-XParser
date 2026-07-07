@@ -22,6 +22,15 @@ TWEET_URL_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+DEFAULT_TWEET_TEXT_TEMPLATE = (
+    "{author}\n\n"
+    "{text}\n\n"
+    "时间：{created_at}"
+    "{metrics_line}"
+    "{media_summary_line}\n"
+    "链接：{url}"
+)
+
 
 @register(
     "astrbot_plugin_xparser",
@@ -62,6 +71,10 @@ class XParserPlugin(Star):
         self.stream_threshold_bytes = int(self._cfg("stream_threshold_mb", 8)) * 1024 * 1024
         self.transfer_mode = self._normalize_transfer_mode(self._cfg("media_transfer_mode", "auto"))
         self.enable_auto_parse = bool(self._cfg("enable_auto_parse", True))
+        self.tweet_text_template = str(
+            self._cfg("tweet_text_template", DEFAULT_TWEET_TEXT_TEMPLATE)
+            or DEFAULT_TWEET_TEXT_TEMPLATE
+        )
         self.merge_text_and_images = bool(self._cfg("merge_text_and_images", True))
         self.max_merged_images = int(self._cfg("max_merged_images", 4))
         self.send_video_as_file = bool(self._cfg("send_video_as_file", True))
@@ -130,20 +143,43 @@ class XParserPlugin(Star):
         author = response.includes.get_author_display(tweet.author_id) if response.includes else None
         if author:
             author_line = f"@{author['username']} ({author['name']})"
+            author_name = author["name"]
+            author_username = author["username"]
         else:
             author_line = f"tweet:{tweet.id}"
+            author_name = ""
+            author_username = ""
 
-        metrics = ""
+        like_count = retweet_count = reply_count = 0
         if tweet.public_metrics:
-            metrics = (
-                f"\n互动：点赞 {tweet.public_metrics.like_count} | "
-                f"转发 {tweet.public_metrics.retweet_count} | "
-                f"回复 {tweet.public_metrics.reply_count}"
-            )
+            like_count = tweet.public_metrics.like_count
+            retweet_count = tweet.public_metrics.retweet_count
+            reply_count = tweet.public_metrics.reply_count
+        metrics_line = f"\n互动：点赞 {like_count} | 转发 {retweet_count} | 回复 {reply_count}"
 
-        media_summary = self._media_summary(response)
+        media_summary = self._media_summary(response).strip()
+        media_summary_line = f"\n媒体：{media_summary}" if media_summary else ""
         url = f"https://x.com/i/status/{tweet.id}"
-        return f"{author_line}\n\n{tweet.text}\n\n时间：{tweet.created_at}{metrics}{media_summary}\n链接：{url}"
+        values = {
+            "author": author_line,
+            "author_name": author_name,
+            "author_username": author_username,
+            "tweet_id": tweet.id,
+            "text": tweet.text,
+            "created_at": tweet.created_at or "",
+            "like_count": like_count,
+            "retweet_count": retweet_count,
+            "reply_count": reply_count,
+            "metrics_line": metrics_line,
+            "media_summary": media_summary,
+            "media_summary_line": media_summary_line,
+            "url": url,
+        }
+        try:
+            return self.tweet_text_template.format(**values).strip()
+        except Exception as exc:
+            logger.warning(f"推文输出模板渲染失败，已使用默认模板: {exc}")
+            return DEFAULT_TWEET_TEXT_TEMPLATE.format(**values).strip()
 
     def _media_summary(self, response: TweetResponse) -> str:
         tweet = response.data
@@ -161,7 +197,7 @@ class XParserPlugin(Star):
             parts.append(f"{counts['video']} 个视频")
         if counts["animated_gif"]:
             parts.append(f"{counts['animated_gif']} 个 GIF")
-        return f"\n媒体：{'，'.join(parts)}" if parts else ""
+        return "，".join(parts) if parts else ""
 
     async def _send_tweet(
         self,

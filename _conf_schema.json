@@ -60,6 +60,12 @@
     "hint": "开启后，群聊或私聊里出现 x.com/twitter.com 的推文链接时会自动解析。关闭后只能用 /xparse <推文链接> 手动解析。",
     "default": true
   },
+  "tweet_text_template": {
+    "description": "推文文字输出模板",
+    "type": "text",
+    "hint": "自定义推文摘要的文字格式。可用占位符：{author}、{author_name}、{author_username}、{tweet_id}、{text}、{created_at}、{like_count}、{retweet_count}、{reply_count}、{metrics_line}、{media_summary}、{media_summary_line}、{url}。写错占位符会自动回退默认模板。",
+    "default": "{author}\n\n{text}\n\n时间：{created_at}{metrics_line}{media_summary_line}\n链接：{url}"
+  },
   "media_transfer_mode": {
     "description": "媒体传输模式",
     "type": "string",

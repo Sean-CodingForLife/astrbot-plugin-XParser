@@ -22,6 +22,7 @@ All notable changes to this project will be documented in this file.
 - Text and image merged sending option to reduce chat noise.
 - Configurable image compression enablement, mode, quality, and target size.
 - Configurable video variant selection strategy.
+- Configurable tweet text output template.
 
 ### Fixed
 
