@@ -1,0 +1,7 @@
+name: astrbot-plugin-XParser
+display_name: XParser
+desc: Parse X/Twitter tweet links and transfer media through NapCat Stream API.
+version: v0.1.0
+astrbot_version: ">=4.0.0"
+author: seant
+repo: ""

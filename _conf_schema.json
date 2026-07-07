@@ -1,0 +1,107 @@
+{
+  "api_bearer_token": {
+    "description": "X API Bearer Token",
+    "type": "string",
+    "hint": "X API v2 Bearer Token. If OAuth 1.0a credentials are configured, this is used as fallback.",
+    "default": "",
+    "is_sensitive": true
+  },
+  "api_key": {
+    "description": "Consumer Key",
+    "type": "string",
+    "default": "",
+    "is_sensitive": true
+  },
+  "api_key_secret": {
+    "description": "Consumer Secret",
+    "type": "string",
+    "default": "",
+    "is_sensitive": true
+  },
+  "oauth_access_token": {
+    "description": "Access Token",
+    "type": "string",
+    "default": "",
+    "is_sensitive": true
+  },
+  "oauth_access_token_secret": {
+    "description": "Access Token Secret",
+    "type": "string",
+    "default": "",
+    "is_sensitive": true
+  },
+  "cookie_auth_token": {
+    "description": "Cookie fallback auth_token",
+    "type": "string",
+    "default": "",
+    "is_sensitive": true
+  },
+  "cookie_ct0": {
+    "description": "Cookie fallback ct0",
+    "type": "string",
+    "default": "",
+    "is_sensitive": true
+  },
+  "graphql_tweet_query_id": {
+    "description": "GraphQL TweetResultByRestId query id",
+    "type": "string",
+    "hint": "Leave empty to use the built-in query id. Update this if Twitter changes its web GraphQL deployment.",
+    "default": ""
+  },
+  "enable_auto_parse": {
+    "description": "Enable automatic tweet URL parsing",
+    "type": "bool",
+    "default": true
+  },
+  "media_transfer_mode": {
+    "description": "Media transfer mode",
+    "type": "string",
+    "hint": "auto: small videos use normal message components and larger/failed videos use NapCat Stream API. stream: force Stream API. local: use normal AstrBot file-system components only.",
+    "default": "auto"
+  },
+  "stream_threshold_mb": {
+    "description": "Auto mode Stream API threshold in MB",
+    "type": "int",
+    "default": 8,
+    "slider": { "min": 1, "max": 100, "step": 1 }
+  },
+  "stream_max_mb": {
+    "description": "Maximum Stream API upload size in MB",
+    "type": "int",
+    "default": 100,
+    "slider": { "min": 1, "max": 100, "step": 1 }
+  },
+  "download_limit_mb": {
+    "description": "Maximum media download size in MB",
+    "type": "int",
+    "default": 100,
+    "slider": { "min": 1, "max": 100, "step": 1 }
+  },
+  "send_video_as_file": {
+    "description": "Upload videos as files when normal sending fails",
+    "type": "bool",
+    "default": true
+  },
+  "image_compress_target_kb": {
+    "description": "Image compression target in KB",
+    "type": "int",
+    "default": 2048,
+    "slider": { "min": 0, "max": 8192, "step": 256 }
+  },
+  "cache_ttl_hours": {
+    "description": "Local cache retention hours",
+    "type": "int",
+    "default": 24,
+    "slider": { "min": 1, "max": 168, "step": 1 }
+  },
+  "enable_proxy": {
+    "description": "Enable proxy for X API and media downloads",
+    "type": "bool",
+    "default": true
+  },
+  "proxy_url": {
+    "description": "HTTP proxy URL",
+    "type": "string",
+    "default": "http://127.0.0.1:7890"
+  }
+}
