@@ -18,6 +18,7 @@ class OneBotNapCatSender:
         transfer_mode: str,
         stream_threshold_bytes: int,
         send_mode: str,
+        forward_node_name: str,
         merge_text_and_images: bool,
         max_merged_images: int,
         send_video_as_file: bool,
@@ -26,6 +27,7 @@ class OneBotNapCatSender:
         self.transfer_mode = transfer_mode
         self.stream_threshold_bytes = stream_threshold_bytes
         self.send_mode = send_mode
+        self.forward_node_name = forward_node_name.strip() or "X 推文解析"
         self.merge_text_and_images = merge_text_and_images
         self.max_merged_images = max_merged_images
         self.send_video_as_file = send_video_as_file
@@ -222,7 +224,7 @@ class OneBotNapCatSender:
         return {
             "type": "node",
             "data": {
-                "name": "XParser",
+                "name": self.forward_node_name,
                 "uin": "10000",
                 "content": content,
             },

@@ -150,6 +150,10 @@ class XParserPlugin(Star):
             send_mode=self._normalize_send_mode(
                 self._cfg("send.send_mode", "普通消息", "send_mode")
             ),
+            forward_node_name=str(
+                self._cfg("send.forward_node_name", "X 推文解析", "forward_node_name")
+                or "X 推文解析"
+            ),
             merge_text_and_images=bool(
                 self._cfg("send.merge_text_and_images", True, "merge_text_and_images")
             ),

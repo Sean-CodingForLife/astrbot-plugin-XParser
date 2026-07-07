@@ -41,6 +41,7 @@ All notable changes to this project will be documented in this file.
 - README expanded with architecture, configuration, troubleshooting, and roadmap notes.
 - Split access control and QQ/OneBot/NapCat message sending into dedicated modules for easier future platform adapters.
 - Grouped AstrBot WebUI settings by function, including authentication, parsing, sending, media processing, access control, and network settings.
+- Added a configurable QQ forward-message node sender name for merged forward messages.
 
 ### Known Issues
 

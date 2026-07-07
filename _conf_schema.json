@@ -106,6 +106,12 @@
           "合并转发"
         ]
       },
+      "forward_node_name": {
+        "description": "合并转发节点名称",
+        "type": "string",
+        "hint": "选择“合并转发”发送样式时，合并消息里每个节点显示的发送者名字。可以填机器人昵称、插件名或你喜欢的固定名称；留空会自动使用“X 推文解析”。",
+        "default": "X 推文解析"
+      },
       "merge_text_and_images": {
         "description": "合并发送文字和图片",
         "type": "bool",
