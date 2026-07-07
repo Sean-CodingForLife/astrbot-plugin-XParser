@@ -1,107 +1,122 @@
 {
   "api_bearer_token": {
-    "description": "X API Bearer Token",
+    "description": "X API Bearer Token（推荐填写）",
     "type": "string",
-    "hint": "X API v2 Bearer Token. If OAuth 1.0a credentials are configured, this is used as fallback.",
+    "hint": "X/Twitter 开发者后台里的 Bearer Token，用来读取公开推文。只填这个通常就可以解析文字、图片和视频信息；如果你同时填写 OAuth 1.0a 四件套，会优先使用 OAuth 1.0a。",
     "default": "",
     "is_sensitive": true
   },
   "api_key": {
-    "description": "Consumer Key",
+    "description": "Consumer Key / API Key（可选）",
     "type": "string",
+    "hint": "OAuth 1.0a 认证用的 Consumer Key。需要和 Consumer Secret、Access Token、Access Token Secret 四项一起填写才会生效；不懂可以先留空。",
     "default": "",
     "is_sensitive": true
   },
   "api_key_secret": {
-    "description": "Consumer Secret",
+    "description": "Consumer Secret / API Secret（可选）",
     "type": "string",
+    "hint": "OAuth 1.0a 认证用的 Consumer Secret。需要和另外三项 OAuth 凭据一起填写；不懂可以先留空。",
     "default": "",
     "is_sensitive": true
   },
   "oauth_access_token": {
-    "description": "Access Token",
+    "description": "Access Token（可选）",
     "type": "string",
+    "hint": "OAuth 1.0a 认证用的 Access Token。需要和 Consumer Key、Consumer Secret、Access Token Secret 一起填写；不懂可以先留空。",
     "default": "",
     "is_sensitive": true
   },
   "oauth_access_token_secret": {
-    "description": "Access Token Secret",
+    "description": "Access Token Secret（可选）",
     "type": "string",
+    "hint": "OAuth 1.0a 认证用的 Access Token Secret。需要和另外三项 OAuth 凭据一起填写；不懂可以先留空。",
     "default": "",
     "is_sensitive": true
   },
   "cookie_auth_token": {
-    "description": "Cookie fallback auth_token",
+    "description": "Cookie 降级认证：auth_token（可选）",
     "type": "string",
+    "hint": "当官方 X API 权限不足或额度用尽时，可用网页登录 Cookie 作为降级解析。auth_token 等同账号登录凭据，请不要泄露；需要和 ct0 同时填写才生效。",
     "default": "",
     "is_sensitive": true
   },
   "cookie_ct0": {
-    "description": "Cookie fallback ct0",
+    "description": "Cookie 降级认证：ct0（可选）",
     "type": "string",
+    "hint": "Twitter/X 网页端的 CSRF Token，需要和 auth_token 同时填写。ct0 会定期变化，如果降级解析突然 401/403，需要重新获取。",
     "default": "",
     "is_sensitive": true
   },
   "graphql_tweet_query_id": {
-    "description": "GraphQL TweetResultByRestId query id",
+    "description": "GraphQL 推文查询 ID（一般留空）",
     "type": "string",
-    "hint": "Leave empty to use the built-in query id. Update this if Twitter changes its web GraphQL deployment.",
+    "hint": "Cookie 降级解析单条推文时使用。留空会使用内置默认值；只有日志提示 TweetResultByRestId queryId 失效时，才需要从浏览器开发者工具里抓新的 queryId 填到这里。",
     "default": ""
   },
   "enable_auto_parse": {
-    "description": "Enable automatic tweet URL parsing",
+    "description": "自动解析聊天里的推文链接",
     "type": "bool",
+    "hint": "开启后，群聊或私聊里出现 x.com/twitter.com 的推文链接时会自动解析。关闭后只能用 /xparse <推文链接> 手动解析。",
     "default": true
   },
   "media_transfer_mode": {
-    "description": "Media transfer mode",
+    "description": "媒体传输模式",
     "type": "string",
-    "hint": "auto: small videos use normal message components and larger/failed videos use NapCat Stream API. stream: force Stream API. local: use normal AstrBot file-system components only.",
+    "hint": "推荐填 auto。auto：小视频先走普通消息，较大视频或发送失败时走 NapCat Stream API；stream：视频强制走 Stream API，适合 AstrBot 和 NapCat 在不同容器且没有共享目录；local：只走本地文件路径，不适合你的双容器无共享目录部署。",
     "default": "auto"
   },
   "stream_threshold_mb": {
-    "description": "Auto mode Stream API threshold in MB",
+    "description": "自动模式下启用 Stream API 的视频大小阈值（MB）",
     "type": "int",
+    "hint": "仅 media_transfer_mode=auto 时生效。视频文件大于等于这个大小时，优先使用 NapCat Stream API。你的部署建议保持 8MB 或更小。",
     "default": 8,
     "slider": { "min": 1, "max": 100, "step": 1 }
   },
   "stream_max_mb": {
-    "description": "Maximum Stream API upload size in MB",
+    "description": "Stream API 最大上传大小（MB）",
     "type": "int",
+    "hint": "NapCat 普通视频/文件链路通常有体积限制，这里默认 100MB。超过此大小会停止上传并退化为原始链接，避免插件卡死。",
     "default": 100,
     "slider": { "min": 1, "max": 100, "step": 1 }
   },
   "download_limit_mb": {
-    "description": "Maximum media download size in MB",
+    "description": "媒体下载大小上限（MB）",
     "type": "int",
+    "hint": "插件会先把 X/Twitter 媒体下载到 AstrBot 容器临时缓存，再传给 NapCat。超过这个大小的媒体不会下载，避免占用过多内存和磁盘。",
     "default": 100,
     "slider": { "min": 1, "max": 100, "step": 1 }
   },
   "send_video_as_file": {
-    "description": "Upload videos as files when normal sending fails",
+    "description": "视频发送失败时改为文件上传",
     "type": "bool",
+    "hint": "开启后，如果普通视频消息发送失败，会尝试通过 NapCat Stream API 上传为群文件/私聊文件。建议开启。",
     "default": true
   },
   "image_compress_target_kb": {
-    "description": "Image compression target in KB",
+    "description": "图片压缩目标大小（KB）",
     "type": "int",
+    "hint": "图片过大时会压缩到接近这个大小再发送。填 0 表示不压缩。默认 2048KB 比较稳。",
     "default": 2048,
     "slider": { "min": 0, "max": 8192, "step": 256 }
   },
   "cache_ttl_hours": {
-    "description": "Local cache retention hours",
+    "description": "本地缓存保留时间（小时）",
     "type": "int",
+    "hint": "下载的图片和视频会临时保存在 AstrBot 容器内，超过这个时间会自动清理。默认 24 小时。",
     "default": 24,
     "slider": { "min": 1, "max": 168, "step": 1 }
   },
   "enable_proxy": {
-    "description": "Enable proxy for X API and media downloads",
+    "description": "启用代理访问 X/Twitter",
     "type": "bool",
+    "hint": "插件访问 X API 和下载媒体时是否走代理。中国大陆部署通常需要开启。",
     "default": true
   },
   "proxy_url": {
-    "description": "HTTP proxy URL",
+    "description": "代理地址",
     "type": "string",
+    "hint": "HTTP 代理地址，例如 http://127.0.0.1:7890。注意：如果 AstrBot 在 Docker 容器里，127.0.0.1 指的是容器内部，不是宿主机；可能需要改成宿主机网关地址或代理容器名。",
     "default": "http://127.0.0.1:7890"
   }
 }
