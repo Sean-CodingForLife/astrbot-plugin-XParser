@@ -66,6 +66,19 @@
     "hint": "推荐填 auto。auto：小视频先走普通消息，较大视频或发送失败时走 NapCat Stream API；stream：视频强制走 Stream API，适合 AstrBot 和 NapCat 在不同容器且没有共享目录；local：只走本地文件路径，不适合你的双容器无共享目录部署。",
     "default": "auto"
   },
+  "merge_text_and_images": {
+    "description": "合并发送文字和图片",
+    "type": "bool",
+    "hint": "开启后，推文文字摘要和图片会尽量合并成一条图文消息，减少刷屏。视频仍会单独发送，因为 QQ/OneBot 对图文视频混合消息兼容性较差。",
+    "default": true
+  },
+  "max_merged_images": {
+    "description": "单条图文消息最多合并图片数",
+    "type": "int",
+    "hint": "当合并发送开启时，最多把多少张图片和文字放在同一条消息里。超过数量的图片会继续单独发送。建议 4。",
+    "default": 4,
+    "slider": { "min": 1, "max": 9, "step": 1 }
+  },
   "stream_threshold_mb": {
     "description": "自动模式下启用 Stream API 的视频大小阈值（MB）",
     "type": "int",

@@ -19,6 +19,7 @@ All notable changes to this project will be documented in this file.
 - File upload fallback when video message sending fails.
 - Chinese configuration descriptions for AstrBot WebUI.
 - Cache TTL cleanup on plugin startup/reload.
+- Text and image merged sending option to reduce chat noise.
 
 ### Fixed
 

@@ -58,6 +58,8 @@ class XParserPlugin(Star):
         self.stream_threshold_bytes = int(self._cfg("stream_threshold_mb", 8)) * 1024 * 1024
         self.transfer_mode = self._normalize_transfer_mode(self._cfg("media_transfer_mode", "auto"))
         self.enable_auto_parse = bool(self._cfg("enable_auto_parse", True))
+        self.merge_text_and_images = bool(self._cfg("merge_text_and_images", True))
+        self.max_merged_images = int(self._cfg("max_merged_images", 4))
         self.send_video_as_file = bool(self._cfg("send_video_as_file", True))
         self.cache_ttl_hours = int(self._cfg("cache_ttl_hours", 24))
         self.cache_dir: Path = StarTools.get_data_dir("astrbot_plugin_xparser")
@@ -103,8 +105,8 @@ class XParserPlugin(Star):
                 user_fields="name,username,profile_image_url",
             )
             response = await self._process_tweet_media(response)
-            await event.send(event.chain_result([Plain(self._format_tweet(response))]))
-            await self._send_tweet_media(event, response)
+            text = self._format_tweet(response)
+            await self._send_tweet(event, response, text)
         except Exception as exc:
             logger.error(f"XParser failed to parse tweet {tweet_id}: {exc}", exc_info=True)
             await event.send(event.chain_result([Plain(f"推文解析失败：{exc}")]))
@@ -157,12 +159,17 @@ class XParserPlugin(Star):
             parts.append(f"{counts['animated_gif']} 个 GIF")
         return f"\n媒体：{'，'.join(parts)}" if parts else ""
 
-    async def _send_tweet_media(self, event: AstrMessageEvent, response: TweetResponse) -> None:
+    async def _send_tweet(
+        self,
+        event: AstrMessageEvent,
+        response: TweetResponse,
+        text: str,
+    ) -> None:
         tweet = response.data
         if not tweet.attachments or not tweet.attachments.media_keys or not response.includes:
+            await event.send(event.chain_result([Plain(text)]))
             return
 
-        image_components = []
         image_paths: list[Path] = []
         videos: list[tuple[Path, str]] = []
 
@@ -179,12 +186,18 @@ class XParserPlugin(Star):
                 if video_path:
                     videos.append((video_path, media.url))
 
+        if not image_paths and not videos:
+            await event.send(event.chain_result([Plain(text)]))
+            return
+
         if image_paths:
-            if NapCatStreamClient.is_aiocqhttp_event(event):
-                await self._send_images_via_onebot_base64(event, image_paths)
+            if self.merge_text_and_images:
+                await self._send_text_with_images(event, text, image_paths)
             else:
-                image_components = [Image.fromFileSystem(str(path)) for path in image_paths]
-                await event.send(event.chain_result(image_components))
+                await event.send(event.chain_result([Plain(text)]))
+                await self._send_images(event, image_paths)
+        else:
+            await event.send(event.chain_result([Plain(text)]))
 
         for video_path, source_url in videos:
             await self._send_video(event, video_path, source_url)
@@ -202,39 +215,86 @@ class XParserPlugin(Star):
             logger.warning(f"Image media download failed: {url} - {exc}")
             return None
 
-    async def _send_images_via_onebot_base64(
-        self, event: AstrMessageEvent, image_paths: list[Path]
+    async def _send_text_with_images(
+        self,
+        event: AstrMessageEvent,
+        text: str,
+        image_paths: list[Path],
+    ) -> None:
+        if not image_paths:
+            await event.send(event.chain_result([Plain(text)]))
+            return
+
+        merge_count = max(0, min(self.max_merged_images, len(image_paths)))
+        merged_paths = image_paths[:merge_count]
+        remaining_paths = image_paths[merge_count:]
+
+        if NapCatStreamClient.is_aiocqhttp_event(event):
+            await self._send_onebot_message(
+                event,
+                [self._plain_segment(text), *[self._image_segment(path) for path in merged_paths]],
+            )
+        else:
+            components = [Plain(text), *[Image.fromFileSystem(str(path)) for path in merged_paths]]
+            await event.send(event.chain_result(components))
+
+        if remaining_paths:
+            await self._send_images(event, remaining_paths)
+
+    async def _send_images(
+        self,
+        event: AstrMessageEvent,
+        image_paths: list[Path],
+    ) -> None:
+        if NapCatStreamClient.is_aiocqhttp_event(event):
+            for path in image_paths:
+                try:
+                    await self._send_onebot_message(event, [self._image_segment(path)])
+                except Exception as exc:
+                    logger.warning(f"OneBot base64 image send failed: {path} - {exc}")
+                    await event.send(event.chain_result([Plain(f"图片发送失败：{path.name}")]))
+            return
+
+        image_components = [Image.fromFileSystem(str(path)) for path in image_paths]
+        await event.send(event.chain_result(image_components))
+
+    async def _send_onebot_message(
+        self,
+        event: AstrMessageEvent,
+        message: list[dict[str, Any]],
     ) -> None:
         bot = getattr(event, "bot", None)
         if bot is None:
             await event.send(
-                event.chain_result([Plain("图片发送失败：当前 aiocqhttp 事件没有可用的 bot 客户端。")])
+                event.chain_result([Plain("消息发送失败：当前 aiocqhttp 事件没有可用的 bot 客户端。")])
             )
             return
 
         group_id = event.get_group_id()
         user_id = event.get_sender_id()
-        for path in image_paths:
-            try:
-                encoded = base64.b64encode(path.read_bytes()).decode("ascii")
-                message = [{"type": "image", "data": {"file": f"base64://{encoded}"}}]
-                if group_id:
-                    await self._call_onebot_action(
-                        bot,
-                        "send_group_msg",
-                        group_id=int(group_id),
-                        message=message,
-                    )
-                else:
-                    await self._call_onebot_action(
-                        bot,
-                        "send_private_msg",
-                        user_id=int(user_id),
-                        message=message,
-                    )
-            except Exception as exc:
-                logger.warning(f"OneBot base64 image send failed: {path} - {exc}")
-                await event.send(event.chain_result([Plain(f"图片发送失败：{path.name}")]))
+        if group_id:
+            await self._call_onebot_action(
+                bot,
+                "send_group_msg",
+                group_id=int(group_id),
+                message=message,
+            )
+        else:
+            await self._call_onebot_action(
+                bot,
+                "send_private_msg",
+                user_id=int(user_id),
+                message=message,
+            )
+
+    @staticmethod
+    def _plain_segment(text: str) -> dict[str, Any]:
+        return {"type": "text", "data": {"text": text}}
+
+    @staticmethod
+    def _image_segment(path: Path) -> dict[str, Any]:
+        encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+        return {"type": "image", "data": {"file": f"base64://{encoded}"}}
 
     async def _download_video(self, tweet_id: str, url: str) -> Path | None:
         try:
