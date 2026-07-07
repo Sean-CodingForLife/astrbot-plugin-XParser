@@ -12,8 +12,9 @@ container, then transferred to NapCat through NapCat's Stream API.
 - Auto-detects `x.com/.../status/...` and `twitter.com/.../status/...` links.
 - Provides `/xparse <tweet-url>` for manual parsing.
 - Extracts tweet text, author, timestamp, metrics, images, videos, and GIFs.
-- Uses NapCat `upload_file_stream` for large video/file transfer.
-- Falls back to normal AstrBot media components or source URLs when needed.
+- Uses NapCat `upload_file_stream` for cross-container media transfer.
+- Sends streamed videos as video messages first, then falls back to file upload
+  or source URLs when needed.
 
 ## Requirements
 

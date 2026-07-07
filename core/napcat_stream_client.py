@@ -147,8 +147,95 @@ class NapCatStreamClient:
             logger.warning(f"NapCat file send after stream upload failed: {file_name} - {exc}")
             return False
 
+    async def upload_stream_then_send_video(
+        self,
+        event: Any,
+        file_path: Path,
+        *,
+        name: str | None = None,
+        folder: str = "/",
+        allow_file_fallback: bool = True,
+    ) -> bool:
+        uploaded_path = await self.upload_file_stream(
+            event,
+            file_path,
+            name=name,
+            folder=folder,
+        )
+        if not uploaded_path:
+            return False
+
+        bot = getattr(event, "bot", None)
+        if bot is None:
+            return False
+
+        file_name = name or Path(file_path).name
+        try:
+            message = [{"type": "video", "data": {"file": uploaded_path}}]
+            await self._send_message(event, bot, message)
+            logger.info(f"NapCat Stream video sent as video message: {file_name}")
+            return True
+        except Exception as exc:
+            logger.warning(
+                f"NapCat video message after stream upload failed, "
+                f"trying file fallback: {file_name} - {exc}"
+            )
+
+        if not allow_file_fallback:
+            return False
+
+        try:
+            await self._send_file(event, bot, uploaded_path, file_name)
+            logger.info(f"NapCat Stream video sent as file fallback: {file_name}")
+            return True
+        except Exception as exc:
+            logger.warning(f"NapCat file fallback after stream upload failed: {file_name} - {exc}")
+            return False
+
     async def _call_stream_action(self, bot: Any, payload: dict[str, Any]) -> Any:
         return await self._call_onebot_action(bot, "upload_file_stream", **payload)
+
+    async def _send_file(
+        self,
+        event: Any,
+        bot: Any,
+        uploaded_path: str,
+        file_name: str,
+    ) -> None:
+        group_id = event.get_group_id()
+        if group_id:
+            await self._call_onebot_action(
+                bot,
+                "upload_group_file",
+                group_id=int(group_id),
+                file=uploaded_path,
+                name=file_name,
+            )
+        else:
+            await self._call_onebot_action(
+                bot,
+                "upload_private_file",
+                user_id=int(event.get_sender_id()),
+                file=uploaded_path,
+                name=file_name,
+            )
+
+    async def _send_message(self, event: Any, bot: Any, message: list[dict[str, Any]]) -> None:
+        group_id = event.get_group_id()
+        if group_id:
+            await self._call_onebot_action(
+                bot,
+                "send_group_msg",
+                group_id=int(group_id),
+                message=message,
+            )
+        else:
+            await self._call_onebot_action(
+                bot,
+                "send_private_msg",
+                user_id=int(event.get_sender_id()),
+                message=message,
+            )
 
     @staticmethod
     async def _call_onebot_action(bot: Any, action: str, **payload: Any) -> Any:

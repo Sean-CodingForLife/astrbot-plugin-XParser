@@ -88,9 +88,9 @@
     "slider": { "min": 1, "max": 100, "step": 1 }
   },
   "send_video_as_file": {
-    "description": "视频发送失败时改为文件上传",
+    "description": "视频消息失败时允许文件兜底",
     "type": "bool",
-    "hint": "开启后，如果普通视频消息发送失败，会尝试通过 NapCat Stream API 上传为群文件/私聊文件。建议开启。",
+    "hint": "开启后，插件会优先把 Stream API 上传后的文件作为视频消息发送；如果视频消息仍失败，再改为群文件/私聊文件。建议开启。",
     "default": true
   },
   "image_compress_target_kb": {

@@ -254,8 +254,11 @@ class XParserPlugin(Star):
         )
 
         if use_stream or self.transfer_mode == "stream":
-            if await self.stream_client.upload_stream_then_send_file(event, path):
-                await event.send(event.chain_result([Plain(f"视频已通过 NapCat Stream API 上传：{path.name}")]))
+            if await self.stream_client.upload_stream_then_send_video(
+                event,
+                path,
+                allow_file_fallback=self.send_video_as_file,
+            ):
                 return
             if self.transfer_mode == "stream":
                 await event.send(event.chain_result([Plain(f"Stream API 上传失败，原始直链：{source_url}")]))
@@ -268,8 +271,11 @@ class XParserPlugin(Star):
         except Exception as exc:
             logger.warning(f"Video component send failed, trying stream fallback: {source_url} - {exc}")
 
-        if self.send_video_as_file and await self.stream_client.upload_stream_then_send_file(event, path):
-            await event.send(event.chain_result([Plain(f"视频已通过 NapCat Stream API 上传：{path.name}")]))
+        if await self.stream_client.upload_stream_then_send_video(
+            event,
+            path,
+            allow_file_fallback=self.send_video_as_file,
+        ):
             return
 
         await event.send(event.chain_result([Plain(f"视频发送失败，原始直链：{source_url}")]))
