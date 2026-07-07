@@ -23,7 +23,7 @@ TWEET_URL_PATTERN = re.compile(
 
 
 @register(
-    "astrbot-plugin-XParser",
+    "astrbot_plugin_xparser",
     "seant",
     "Parse X/Twitter links and send tweet media through NapCat Stream API",
     "0.1.0",
@@ -59,7 +59,7 @@ class XParserPlugin(Star):
         self.enable_auto_parse = bool(self._cfg("enable_auto_parse", True))
         self.send_video_as_file = bool(self._cfg("send_video_as_file", True))
         self.cache_ttl_hours = int(self._cfg("cache_ttl_hours", 24))
-        self.cache_dir: Path = StarTools.get_data_dir("astrbot-plugin-XParser")
+        self.cache_dir: Path = StarTools.get_data_dir("astrbot_plugin_xparser")
         self.image_dir = self.cache_dir / "images"
         self.video_dir = self.cache_dir / "videos"
         for directory in (self.image_dir, self.video_dir):
