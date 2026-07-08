@@ -124,10 +124,10 @@ class XParserPlugin(Star):
             base_url=str(
                 self._cfg(
                     "send.temp_media_base_url",
-                    "http://astrbot:6185",
+                    "http://astrbot:6190",
                     "temp_media_base_url",
                 )
-                or "http://astrbot:6185"
+                or "http://astrbot:6190"
             ),
             path_prefix=str(
                 self._cfg(
@@ -137,8 +137,28 @@ class XParserPlugin(Star):
                 )
                 or "/xparser/media"
             ),
+            host=str(
+                self._cfg(
+                    "send.temp_media_http_host",
+                    "0.0.0.0",
+                    "temp_media_http_host",
+                )
+                or "0.0.0.0"
+            ),
+            port=int(
+                self._cfg(
+                    "send.temp_media_http_port",
+                    6190,
+                    "temp_media_http_port",
+                )
+            ),
             enabled=bool(
                 self._cfg(
+                    "send.enable_temp_media_http_server",
+                    True,
+                    "enable_temp_media_http_server",
+                )
+                and self._cfg(
                     "send.enable_temp_media_http_fallback",
                     True,
                     "enable_temp_media_http_fallback",
@@ -245,7 +265,7 @@ class XParserPlugin(Star):
 
     async def initialize(self):
         try:
-            await self.temp_media_server.setup(self.context)
+            await self.temp_media_server.setup()
         except Exception as exc:
             logger.warning(f"Temp media HTTP fallback setup skipped: {exc}")
         self.temp_media_registry.cleanup_expired()
@@ -501,6 +521,8 @@ class XParserPlugin(Star):
                     logger.debug(f"Cache cleanup skipped {item}: {exc}")
 
     async def terminate(self):
+        if hasattr(self.temp_media_server, "close"):
+            await self.temp_media_server.close()
         if hasattr(self.api_client, "close"):
             await self.api_client.close()
         if hasattr(self.media_processor, "close"):
