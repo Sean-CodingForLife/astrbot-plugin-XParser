@@ -277,6 +277,7 @@ class XParserPlugin(Star):
                 "Please change transport.temp_media_http_port and transport.temp_media_base_url."
             )
         self.temp_media_registry.cleanup_expired()
+        self._warn_send_config_ignored_fields()
 
     def _cfg(self, key: str, default: Any, legacy_key: str | None = None) -> Any:
         missing = object()
@@ -319,6 +320,46 @@ class XParserPlugin(Star):
                 "temp_media_base_url 中检测到显式端口："
                 f"{raw_value}。建议写成不带端口的 http://astrbot，"
                 "插件会自动拼接 transport.temp_media_http_port。"
+            )
+
+    def _warn_send_config_ignored_fields(self) -> None:
+        send_mode = self._normalize_send_mode(
+            self._cfg("send.send_mode", "普通消息", "send_mode")
+        )
+        forward_node_uin_mode = str(
+            self._cfg("send.forward_node_uin_mode", "bot", "forward_node_uin_mode")
+            or "bot"
+        ).strip()
+        forward_node_uin = str(
+            self._cfg("send.forward_node_uin", "10000", "forward_node_uin") or "10000"
+        ).strip()
+        merge_text_and_images = bool(
+            self._cfg("send.merge_text_and_images", True, "merge_text_and_images")
+        )
+
+        if send_mode != "forward":
+            logger.info(
+                "当前发送样式为普通消息，已忽略合并转发节点相关设置："
+                "send.forward_node_name / send.forward_node_uin_mode / send.forward_node_uin"
+            )
+        if send_mode != "forward" and forward_node_uin != "10000":
+            logger.warning(
+                f"检测到 send.forward_node_uin={forward_node_uin}，"
+                "但当前发送样式不是合并转发，该设置当前不会生效。"
+            )
+        if send_mode == "forward" and forward_node_uin_mode != "fixed" and forward_node_uin != "10000":
+            logger.info(
+                f"当前合并转发节点 UIN 策略为 {forward_node_uin_mode}，"
+                f"已忽略自定义 send.forward_node_uin={forward_node_uin}。"
+            )
+        if send_mode != "normal":
+            logger.info(
+                "当前发送样式为合并转发，已忽略普通消息图文合并相关设置："
+                "send.merge_text_and_images / send.max_merged_images"
+            )
+        if send_mode == "normal" and not merge_text_and_images:
+            logger.info(
+                "当前普通消息模式未启用图文合并，send.max_merged_images 当前不会生效。"
             )
 
     @staticmethod

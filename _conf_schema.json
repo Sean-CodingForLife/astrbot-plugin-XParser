@@ -83,7 +83,7 @@
   "send": {
     "description": "发送设置",
     "type": "object",
-    "hint": "控制消息发送样式与图文组织方式。",
+    "hint": "先选择发送样式，再按需调整普通消息或合并转发相关设置。",
     "items": {
       "send_mode": {
         "description": "发送样式",
@@ -98,13 +98,13 @@
       "forward_node_name": {
         "description": "合并转发节点名称",
         "type": "string",
-        "hint": "选择“合并转发”发送样式时显示的发送者名称。",
+        "hint": "仅在发送样式为“合并转发”时使用，控制显示的发送者名称。",
         "default": "X 推文解析"
       },
       "forward_node_uin_mode": {
         "description": "合并转发节点 UIN 策略",
         "type": "string",
-        "hint": "bot：优先使用机器人自身 QQ 号，最稳妥；fixed：使用下方自定义 UIN，但可能导致头像异常、显示异常或风控风险；default：固定使用 10000。",
+        "hint": "仅在发送样式为“合并转发”时使用。bot：优先使用机器人自身 QQ 号，最稳妥；fixed：使用下方自定义 UIN，但可能导致头像异常、显示异常或风控风险；default：固定使用 10000。",
         "default": "bot",
         "options": [
           "bot",
@@ -115,19 +115,19 @@
       "forward_node_uin": {
         "description": "合并转发节点 UIN",
         "type": "string",
-        "hint": "仅在合并转发节点 UIN 策略为 fixed 时使用。客户端通常会根据这个 UIN 决定节点头像，不建议随意填写陌生 QQ 号。",
+        "hint": "仅在发送样式为“合并转发”且合并转发节点 UIN 策略为 fixed 时使用。客户端通常会根据这个 UIN 决定节点头像，不建议随意填写陌生 QQ 号。",
         "default": "10000"
       },
       "merge_text_and_images": {
-        "description": "合并发送文字和图片",
+        "description": "普通消息模式下合并发送文字和图片",
         "type": "bool",
-        "hint": "开启后，在普通消息模式下尽量把推文文字和图片放在同一条消息里。",
+        "hint": "仅在发送样式为“普通消息”时使用。开启后，尽量把推文文字和图片放在同一条消息里。",
         "default": true
       },
       "max_merged_images": {
-        "description": "单条图文消息最多合并图片数",
+        "description": "普通消息模式下单条图文消息最多合并图片数",
         "type": "int",
-        "hint": "超过这个数量的图片会继续单独发送。",
+        "hint": "仅在发送样式为“普通消息”且开启“合并发送文字和图片”时使用。超过这个数量的图片会继续单独发送。",
         "default": 4,
         "slider": {
           "min": 1,
