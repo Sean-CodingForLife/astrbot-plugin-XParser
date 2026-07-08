@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import inspect
 import mimetypes
 from pathlib import Path
 from typing import Any
@@ -105,7 +106,7 @@ class OneBotSender:
         if not OneBotStreamClient.is_aiocqhttp_event(event):
             return False
 
-        forward_node_uin = self._resolve_forward_node_uin(event)
+        forward_node_uin = await self._resolve_forward_node_uin(event)
         for mode in self._image_send_modes():
             nodes: list[dict[str, Any]] = [
                 self._forward_node([self._plain_segment(text)], forward_node_uin)
@@ -306,7 +307,7 @@ class OneBotSender:
             },
         }
 
-    def _resolve_forward_node_uin(self, event: Any) -> str:
+    async def _resolve_forward_node_uin(self, event: Any) -> str:
         if self.forward_node_uin_mode == "fixed":
             if not self.forward_node_uin.isdigit():
                 logger.warning(
@@ -337,11 +338,8 @@ class OneBotSender:
                 continue
             try:
                 result = method()
-                if hasattr(result, "__await__"):
-                    logger.warning(
-                        "无法同步获取机器人自身 QQ 号，合并转发节点 UIN 将回退到默认值 10000。"
-                    )
-                    break
+                if inspect.isawaitable(result):
+                    result = await result
                 if isinstance(result, dict):
                     for key in ("user_id", "uin", "qq", "self_id"):
                         value = result.get(key)
