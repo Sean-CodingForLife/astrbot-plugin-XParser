@@ -10,13 +10,13 @@ from typing import Any
 from astrbot.api import logger
 
 
-class NapCatStreamClient:
-    """Small wrapper around NapCat's Stream API actions.
+class OneBotStreamClient:
+    """Small wrapper around OneBot streaming-capable upload actions.
 
     AstrBot's aiocqhttp adapter exposes the underlying OneBot client on
-    ``event.bot``.  NapCat action wrappers vary by adapter version, so this
-    class tries the explicit stream method first and then falls back to a raw
-    ``call_action`` style invocation.
+    ``event.bot``.  Different OneBot clients may expose stream-related actions
+    differently, so this class tries explicit methods first and then falls back
+    to raw ``call_action`` style invocation.
     """
 
     def __init__(self, max_bytes: int = 100 * 1024 * 1024):
@@ -45,18 +45,18 @@ class NapCatStreamClient:
 
         bot = getattr(event, "bot", None)
         if bot is None:
-            logger.warning("NapCat Stream upload skipped: current event has no bot client")
+            logger.warning("跳过流式上传：当前事件没有可用的 OneBot bot 客户端")
             return None
 
         file_path = Path(file_path)
         if not file_path.is_file():
-            logger.warning(f"NapCat Stream upload skipped, file missing: {file_path}")
+            logger.warning(f"跳过流式上传：文件不存在 {file_path}")
             return None
 
         size = file_path.stat().st_size
         if size <= 0 or size > self.max_bytes:
             logger.warning(
-                "NapCat Stream upload skipped, file size out of bounds: "
+                "跳过流式上传：文件大小超出范围 "
                 f"{file_path} ({size} bytes)"
             )
             return None
@@ -94,15 +94,15 @@ class NapCatStreamClient:
             final_result = await self._call_stream_action(bot, complete_payload)
             uploaded_path = self._extract_uploaded_path(final_result)
             if uploaded_path:
-                logger.info(f"NapCat Stream API uploaded file: {file_name} -> {uploaded_path}")
+                logger.info(f"流式上传完成：{file_name} -> {uploaded_path}")
                 return uploaded_path
-            logger.warning(f"NapCat Stream API finished without a file path: {file_name}")
+            logger.warning(f"流式上传结束但未返回文件路径：{file_name}")
             return None
         except Exception as exc:
-            logger.warning(f"NapCat Stream API upload failed: {file_name} - {exc}")
+            logger.warning(f"流式上传失败：{file_name} | {exc}")
             return None
 
-        logger.warning("NapCat Stream API unavailable on current OneBot client")
+        logger.warning("当前 OneBot 客户端不支持流式上传")
         return None
 
     async def upload_stream_then_send_file(
@@ -146,7 +146,7 @@ class NapCatStreamClient:
                 )
             return True
         except Exception as exc:
-            logger.warning(f"NapCat file send after stream upload failed: {file_name} - {exc}")
+            logger.warning(f"流式上传后发送文件失败：{file_name} | {exc}")
             return False
 
     async def upload_stream_then_send_video(
@@ -175,12 +175,11 @@ class NapCatStreamClient:
         try:
             message = [{"type": "video", "data": {"file": uploaded_path}}]
             await self._send_message(event, bot, message)
-            logger.info(f"NapCat Stream video sent as video message: {file_name}")
+            logger.info(f"流式上传后已作为视频消息发送：{file_name}")
             return True
         except Exception as exc:
             logger.warning(
-                f"NapCat video message after stream upload failed, "
-                f"trying file fallback: {file_name} - {exc}"
+                f"流式上传后的视频消息发送失败，准备回退到文件发送：{file_name} | {exc}"
             )
 
         if not allow_file_fallback:
@@ -188,10 +187,10 @@ class NapCatStreamClient:
 
         try:
             await self._send_file(event, bot, uploaded_path, file_name)
-            logger.info(f"NapCat Stream video sent as file fallback: {file_name}")
+            logger.info(f"流式上传后已回退为文件发送：{file_name}")
             return True
         except Exception as exc:
-            logger.warning(f"NapCat file fallback after stream upload failed: {file_name} - {exc}")
+            logger.warning(f"流式上传后的文件回退发送失败：{file_name} | {exc}")
             return False
 
     async def _call_stream_action(self, bot: Any, payload: dict[str, Any]) -> Any:

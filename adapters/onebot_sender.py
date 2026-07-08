@@ -8,14 +8,14 @@ from typing import Any
 from astrbot.api import logger
 from astrbot.core.message.components import Image, Plain, Video
 
-from ..core.napcat_stream_client import NapCatStreamClient
+from ..core.onebot_stream_client import OneBotStreamClient
 from ..core.temp_media_server import TempMediaServer
 
 
-class OneBotNapCatSender:
+class OneBotSender:
     def __init__(
         self,
-        stream_client: NapCatStreamClient,
+        stream_client: OneBotStreamClient,
         *,
         transfer_mode: str,
         stream_threshold_bytes: int,
@@ -96,7 +96,7 @@ class OneBotNapCatSender:
         image_items: list[tuple[Path, str]],
         video_count: int,
     ) -> bool:
-        if not NapCatStreamClient.is_aiocqhttp_event(event):
+        if not OneBotStreamClient.is_aiocqhttp_event(event):
             return False
 
         for mode in self._image_send_modes():
@@ -125,17 +125,17 @@ class OneBotNapCatSender:
             try:
                 await self._send_onebot_forward(event, nodes)
                 if mode == "temp":
-                    logger.info("Forward image message sent via temp media HTTP fallback")
+                    logger.info("合并转发图片已通过临时 HTTP URL 发送")
                 elif mode == "base64":
-                    logger.info("Forward image message sent via base64 fallback")
+                    logger.info("合并转发图片已通过 base64 兜底发送")
                 return True
             except Exception as exc:
                 if mode == "source":
-                    logger.warning(f"Forward image source URL send failed: {exc}")
+                    logger.warning(f"合并转发图片原始 URL 发送失败：{exc}")
                 elif mode == "temp":
-                    logger.warning(f"Forward image temp media HTTP send failed: {exc}")
+                    logger.warning(f"合并转发图片临时 HTTP URL 发送失败：{exc}")
                 if mode == "base64":
-                    logger.warning(f"Forward image base64 send failed: {exc}")
+                    logger.warning(f"合并转发图片 base64 兜底发送失败：{exc}")
                 continue
         return False
 
@@ -153,7 +153,7 @@ class OneBotNapCatSender:
         merged_items = image_items[:merge_count]
         remaining_items = image_items[merge_count:]
 
-        if NapCatStreamClient.is_aiocqhttp_event(event):
+        if OneBotStreamClient.is_aiocqhttp_event(event):
             sent = False
             for mode in self._image_send_modes():
                 try:
@@ -168,18 +168,18 @@ class OneBotNapCatSender:
                         ],
                     )
                     if mode == "temp":
-                        logger.info("Merged image message sent via temp media HTTP fallback")
+                        logger.info("图文合并消息已通过临时 HTTP URL 发送")
                     elif mode == "base64":
-                        logger.info("Merged image message sent via base64 fallback")
+                        logger.info("图文合并消息已通过 base64 兜底发送")
                     sent = True
                     break
                 except Exception as exc:
                     if mode == "source":
-                        logger.warning(f"Merged image source URL send failed: {exc}")
+                        logger.warning(f"图文合并消息原始 URL 发送失败：{exc}")
                     elif mode == "temp":
-                        logger.warning(f"Merged image temp media HTTP send failed: {exc}")
+                        logger.warning(f"图文合并消息临时 HTTP URL 发送失败：{exc}")
                     if mode == "base64":
-                        logger.warning(f"Merged image base64 send failed: {exc}")
+                        logger.warning(f"图文合并消息 base64 兜底发送失败：{exc}")
             if not sent:
                 await event.send(event.chain_result([Plain(text)]))
                 await self._send_images(event, merged_items)
@@ -195,7 +195,7 @@ class OneBotNapCatSender:
         event: Any,
         image_items: list[tuple[Path, str]],
     ) -> None:
-        if NapCatStreamClient.is_aiocqhttp_event(event):
+        if OneBotStreamClient.is_aiocqhttp_event(event):
             for path, source_url in image_items:
                 sent = False
                 for mode in self._image_send_modes():
@@ -205,23 +205,23 @@ class OneBotNapCatSender:
                             [self._image_segment(path, source_url, mode)],
                         )
                         if mode == "temp":
-                            logger.info(f"Image sent via temp media HTTP for {path.name}")
+                            logger.info(f"图片已通过临时 HTTP URL 发送：{path.name}")
                         elif mode == "base64":
-                            logger.info(f"Image sent via base64 fallback for {path.name}")
+                            logger.info(f"图片已通过 base64 兜底发送：{path.name}")
                         sent = True
                         break
                     except Exception as exc:
                         if mode == "source":
                             logger.warning(
-                                f"Image source URL send failed for {path.name}: {source_url} - {exc}"
+                                f"图片原始 URL 发送失败：{path.name} | {source_url} | {exc}"
                             )
                         elif mode == "temp":
                             logger.warning(
-                                f"Image temp media HTTP send failed for {path.name} - {exc}"
+                                f"图片临时 HTTP URL 发送失败：{path.name} | {exc}"
                             )
                         if mode == "base64":
                             logger.warning(
-                                f"Image base64 send failed for {path.name} - {exc}"
+                                f"图片 base64 兜底发送失败：{path.name} | {exc}"
                             )
                 if not sent:
                     await event.send(event.chain_result([Plain(f"图片发送失败：{path.name}")]))
@@ -296,7 +296,7 @@ class OneBotNapCatSender:
         }
 
     async def _send_video(self, event: Any, path: Path, source_url: str) -> None:
-        if NapCatStreamClient.is_aiocqhttp_event(event):
+        if OneBotStreamClient.is_aiocqhttp_event(event):
             for mode in self._video_send_modes():
                 try:
                     await self._send_onebot_message(
@@ -304,18 +304,18 @@ class OneBotNapCatSender:
                         [self._video_segment(path, source_url, mode)],
                     )
                     if mode == "source":
-                        logger.info(f"Video/GIF sent via source URL for {path.name}")
+                        logger.info(f"视频/GIF 已通过原始 URL 发送：{path.name}")
                     elif mode == "temp":
-                        logger.info(f"Video/GIF sent via temp media HTTP for {path.name}")
+                        logger.info(f"视频/GIF 已通过临时 HTTP URL 发送：{path.name}")
                     return
                 except Exception as exc:
                     if mode == "source":
                         logger.warning(
-                            f"Video/GIF source URL send failed for {path.name}: {source_url} - {exc}"
+                            f"视频/GIF 原始 URL 发送失败：{path.name} | {source_url} | {exc}"
                         )
                     elif mode == "temp":
                         logger.warning(
-                            f"Video/GIF temp media HTTP send failed for {path.name} - {exc}"
+                            f"视频/GIF 临时 HTTP URL 发送失败：{path.name} | {exc}"
                         )
 
         use_stream = self.transfer_mode == "stream" or (
@@ -330,7 +330,7 @@ class OneBotNapCatSender:
             ):
                 return
             if self.transfer_mode == "stream":
-                await event.send(event.chain_result([Plain(f"Stream API 上传失败，原始直链：{source_url}")]))
+                await event.send(event.chain_result([Plain(f"流式上传发送失败，原始直链：{source_url}")]))
                 return
 
         try:
@@ -339,7 +339,7 @@ class OneBotNapCatSender:
                 return
         except Exception as exc:
             logger.warning(
-                f"Video component send failed, trying stream fallback: {source_url} - {exc}"
+                f"本地视频消息发送失败，准备回退到流式上传：{source_url} | {exc}"
             )
 
         if await self.stream_client.upload_stream_then_send_video(
@@ -378,7 +378,7 @@ class OneBotNapCatSender:
             if temp_url:
                 return {"type": "image", "data": {"file": temp_url}}
             logger.warning(
-                f"Temp media URL creation failed for {path.name}, falling back to base64"
+                f"图片临时 HTTP URL 生成失败，准备回退到 base64：{path.name}"
             )
 
         encoded = base64.b64encode(path.read_bytes()).decode("ascii")
@@ -398,7 +398,7 @@ class OneBotNapCatSender:
             if temp_url:
                 return {"type": "video", "data": {"file": temp_url}}
             logger.warning(
-                f"Temp media URL creation failed for {path.name}, falling back to local/stream video send"
+                f"视频临时 HTTP URL 生成失败，准备回退到后续视频发送链路：{path.name}"
             )
 
         raise RuntimeError(f"unsupported video send mode: {mode}")
