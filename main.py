@@ -11,7 +11,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 from astrbot.core.message.components import Plain
 
-from .adapters.onebot_napcat import OneBotNapCatSender
+from .adapters.onebot_sender import OneBotSender
 from .core.access_control import (
     AccessControl,
     AccessControlConfig,
@@ -19,7 +19,7 @@ from .core.access_control import (
     normalize_id_set,
 )
 from .core.media_processor import MediaProcessor
-from .core.napcat_stream_client import NapCatStreamClient
+from .core.onebot_stream_client import OneBotStreamClient
 from .core.temp_media_registry import TempMediaRegistry
 from .core.temp_media_server import TempMediaServer
 from .core.x_api_client import XApiClient
@@ -44,7 +44,7 @@ DEFAULT_TWEET_TEXT_TEMPLATE = (
 @register(
     "astrbot_plugin_xparser",
     "seant",
-    "Parse X/Twitter links and send tweet media through NapCat Stream API",
+    "用于 AstrBot aiocqhttp/OneBot 场景的 X/Twitter 推文解析插件，内置 OneBot 发送适配器",
     "0.1.0",
 )
 class XParserPlugin(Star):
@@ -114,24 +114,22 @@ class XParserPlugin(Star):
                 "proxy_url",
             ),
         )
-        self.stream_client = NapCatStreamClient(
-            max_bytes=int(self._cfg("send.stream_max_mb", 100, "stream_max_mb"))
+        self.stream_client = OneBotStreamClient(
+            max_bytes=int(self._cfg("transport.stream_max_mb", 100))
             * 1024
             * 1024
         )
         temp_media_http_port = int(
             self._cfg(
-                "send.temp_media_http_port",
+                "transport.temp_media_http_port",
                 6190,
-                "temp_media_http_port",
             )
         )
         temp_media_base_url = self._normalize_temp_media_base_url(
             str(
                 self._cfg(
-                    "send.temp_media_base_url",
+                    "transport.temp_media_base_url",
                     "http://astrbot",
-                    "temp_media_base_url",
                 )
                 or "http://astrbot"
             ),
@@ -143,36 +141,33 @@ class XParserPlugin(Star):
             base_url=temp_media_base_url,
             path_prefix=str(
                 self._cfg(
-                    "send.temp_media_path_prefix",
+                    "transport.temp_media_path_prefix",
                     "/xparser/media",
-                    "temp_media_path_prefix",
                 )
                 or "/xparser/media"
             ),
             host=str(
                 self._cfg(
-                    "send.temp_media_http_host",
+                    "transport.temp_media_http_host",
                     "0.0.0.0",
-                    "temp_media_http_host",
                 )
                 or "0.0.0.0"
             ),
             port=temp_media_http_port,
             enabled=bool(
                 self._cfg(
-                    "send.enable_temp_media_http_fallback",
+                    "transport.enable_temp_media_http_fallback",
                     True,
-                    "enable_temp_media_http_fallback",
                 )
             ),
         )
         self.stream_threshold_bytes = (
-            int(self._cfg("send.stream_threshold_mb", 8, "stream_threshold_mb"))
+            int(self._cfg("transport.stream_threshold_mb", 8))
             * 1024
             * 1024
         )
         transfer_mode = self._normalize_transfer_mode(
-            self._cfg("send.media_transfer_mode", "auto", "media_transfer_mode")
+            self._cfg("transport.media_transfer_mode", "auto")
         )
         self.enable_auto_parse = bool(
             self._cfg("parse.enable_auto_parse", True, "enable_auto_parse")
@@ -225,7 +220,7 @@ class XParserPlugin(Star):
                 ),
             )
         )
-        self.sender = OneBotNapCatSender(
+        self.sender = OneBotSender(
             self.stream_client,
             transfer_mode=transfer_mode,
             stream_threshold_bytes=self.stream_threshold_bytes,
@@ -243,14 +238,13 @@ class XParserPlugin(Star):
                 self._cfg("send.max_merged_images", 4, "max_merged_images")
             ),
             send_video_as_file=bool(
-                self._cfg("send.send_video_as_file", True, "send_video_as_file")
+                self._cfg("transport.send_video_as_file", True)
             ),
             temp_media_server=self.temp_media_server,
             temp_media_ttl_seconds=int(
                 self._cfg(
-                    "send.temp_media_ttl_seconds",
+                    "transport.temp_media_ttl_seconds",
                     300,
-                    "temp_media_ttl_seconds",
                 )
             ),
         )
@@ -272,7 +266,7 @@ class XParserPlugin(Star):
             logger.warning(
                 "Temp media HTTP server failed to start on "
                 f"{self.temp_media_server.host}:{self.temp_media_server.port}: {exc}. "
-                "Please change send.temp_media_http_port and send.temp_media_base_url."
+                "Please change transport.temp_media_http_port and transport.temp_media_base_url."
             )
         self.temp_media_registry.cleanup_expired()
 
@@ -298,9 +292,8 @@ class XParserPlugin(Star):
     def _warn_temp_media_base_url_config(self) -> None:
         raw_value = str(
             self._cfg(
-                "send.temp_media_base_url",
+                "transport.temp_media_base_url",
                 "",
-                "temp_media_base_url",
             )
             or ""
         ).strip()
@@ -309,15 +302,15 @@ class XParserPlugin(Star):
         parsed = urlparse(raw_value)
         if not parsed.scheme or not parsed.netloc:
             logger.warning(
-                "Invalid temp_media_base_url detected: "
-                f"{raw_value}. Prefer using a full URL such as http://astrbot."
+                "检测到无效的 temp_media_base_url："
+                f"{raw_value}。建议使用 http://astrbot 这样的完整 URL。"
             )
             return
         if parsed.port is not None:
             logger.warning(
-                "Explicit port detected in temp_media_base_url: "
-                f"{raw_value}. Prefer using http://astrbot without an explicit port; "
-                "the plugin will append send.temp_media_http_port automatically."
+                "temp_media_base_url 中检测到显式端口："
+                f"{raw_value}。建议写成不带端口的 http://astrbot，"
+                "插件会自动拼接 transport.temp_media_http_port。"
             )
 
     @staticmethod

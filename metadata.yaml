@@ -1,6 +1,6 @@
 name: astrbot_plugin_xparser
 display_name: XParser
-desc: Parse X/Twitter tweet links for AstrBot aiocqhttp/OneBot + NapCat Stream API deployments.
+desc: X/Twitter 推文解析插件，适用于 AstrBot aiocqhttp/OneBot 场景，当前版本内置 OneBot 发送适配器与流式上传链路。
 version: v0.1.0
 astrbot_version: ">=4.0.0"
 author: seant

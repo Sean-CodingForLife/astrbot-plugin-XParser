@@ -83,19 +83,8 @@
   "send": {
     "description": "发送设置",
     "type": "object",
-    "hint": "控制消息发送样式、视频传输策略以及图片 HTTP 临时媒体兜底。",
+    "hint": "控制消息发送样式与图文组织方式。",
     "items": {
-      "media_transfer_mode": {
-        "description": "媒体传输模式",
-        "type": "string",
-        "hint": "auto：小视频优先本地发送，失败或较大视频时再走 Stream API；stream：强制走 Stream API；local：只走本地路径。",
-        "default": "auto",
-        "options": [
-          "auto",
-          "stream",
-          "local"
-        ]
-      },
       "send_mode": {
         "description": "发送样式",
         "type": "string",
@@ -128,11 +117,29 @@
           "max": 9,
           "step": 1
         }
+      }
+    }
+  },
+  "transport": {
+    "description": "发送适配器传输设置",
+    "type": "object",
+    "hint": "控制当前发送适配器使用的媒体投递链路、流式上传和临时 HTTP 媒体服务。",
+    "items": {
+      "media_transfer_mode": {
+        "description": "视频投递策略",
+        "type": "string",
+        "hint": "auto：小视频优先直接发送，失败或较大视频时再走流式上传；stream：强制优先走流式上传；local：只尝试本地路径发送。",
+        "default": "auto",
+        "options": [
+          "auto",
+          "stream",
+          "local"
+        ]
       },
       "stream_threshold_mb": {
-        "description": "自动模式下启用 Stream API 的视频大小阈值（MB）",
+        "description": "自动切换流式上传的视频大小阈值（MB）",
         "type": "int",
-        "hint": "仅在 media_transfer_mode 为 auto 时生效。",
+        "hint": "仅在“视频投递策略”为 auto 时生效。",
         "default": 8,
         "slider": {
           "min": 1,
@@ -141,9 +148,9 @@
         }
       },
       "stream_max_mb": {
-        "description": "Stream API 最大上传大小（MB）",
+        "description": "流式上传大小上限（MB）",
         "type": "int",
-        "hint": "超过该大小时会停止上传并回退，避免插件长时间卡住。",
+        "hint": "超过该大小时会停止流式上传并进入后续回退链路，避免插件长时间卡住。",
         "default": 100,
         "slider": {
           "min": 1,
@@ -152,15 +159,15 @@
         }
       },
       "send_video_as_file": {
-        "description": "视频消息失败时允许文件兜底",
+        "description": "视频投递失败时允许改为文件发送",
         "type": "bool",
-        "hint": "开启后，视频消息失败时再改为群文件或私聊文件。",
+        "hint": "开启后，视频消息发送失败时会再尝试群文件或私聊文件发送。",
         "default": true
       },
       "enable_temp_media_http_fallback": {
-        "description": "启用 HTTP 临时媒体服务与兜底",
+        "description": "启用 HTTP 临时媒体服务",
         "type": "bool",
-        "hint": "开启后，插件会启动内置临时媒体 HTTP 服务，并在媒体发送时尝试原始 URL -> HTTP 临时 URL -> 后备链路。",
+        "hint": "开启后，插件会启动内置临时媒体 HTTP 服务，并在媒体发送时加入 HTTP 临时 URL 这一层回退。",
         "default": true
       },
       "temp_media_http_host": {
@@ -183,7 +190,7 @@
       "temp_media_base_url": {
         "description": "HTTP 临时媒体基地址",
         "type": "string",
-        "hint": "NapCat 可直接访问到的临时媒体服务地址主机名，例如 http://astrbot。若未显式填写端口，插件会自动拼接上方的临时媒体 HTTP 服务端口。",
+        "hint": "发送适配器一侧可直接访问到的临时媒体服务地址主机名，例如 http://astrbot。若未显式填写端口，插件会自动拼接上方的临时媒体 HTTP 服务端口。",
         "default": "http://astrbot"
       },
       "temp_media_path_prefix": {
@@ -195,7 +202,7 @@
       "temp_media_ttl_seconds": {
         "description": "HTTP 临时媒体有效期（秒）",
         "type": "int",
-        "hint": "临时图片 URL 的有效时间，默认 300 秒。",
+        "hint": "临时媒体 URL 的有效时间，默认 300 秒。",
         "default": 300,
         "slider": {
           "min": 30,
