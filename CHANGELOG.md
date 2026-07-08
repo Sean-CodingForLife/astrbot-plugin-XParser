@@ -24,10 +24,10 @@
   - 原始图片 URL
   - 临时媒体 HTTP URL
   - `base64://`
-- 视频 / GIF 保持独立链路：
-  - 本地视频消息
-  - NapCat Stream API
-  - 文件回退
+- 视频 / GIF 统一接入 URL / HTTP 兜底：
+  - 原始视频 URL
+  - 临时媒体 HTTP URL
+  - 本地视频消息 / NapCat Stream API / 文件回退
 
 ### 临时媒体 HTTP 服务
 
@@ -35,15 +35,13 @@
 - 支持临时 token、TTL、按路径返回文件流
 - 支持通过 `send.temp_media_http_host` 和 `send.temp_media_http_port` 配置监听地址与端口
 - `send.temp_media_base_url` 改为只表达访问主机地址，未显式填写端口时自动拼接 `temp_media_http_port`
-- 增加旧配置迁移：
-  - `http://astrbot:6185`
-  - `http://astrbot:6190`
-  - 会尝试迁正为 `http://astrbot`
+- 图片、视频、GIF 都可使用临时媒体 HTTP URL 作为兜底层
 
 ### 日志与排错
 
 - 增加临时媒体 HTTP 服务启动失败日志
 - 增加图片 `source / temp HTTP / base64` 三层发送链路日志
+- 增加视频 / GIF `source / temp HTTP / 后备链路` 日志
 - 增加临时媒体 URL 生成失败日志
 - 增加 NapCat Stream 上传缺少 bot 客户端、文件不存在等提示日志
 

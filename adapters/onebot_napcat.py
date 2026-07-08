@@ -296,6 +296,28 @@ class OneBotNapCatSender:
         }
 
     async def _send_video(self, event: Any, path: Path, source_url: str) -> None:
+        if NapCatStreamClient.is_aiocqhttp_event(event):
+            for mode in self._video_send_modes():
+                try:
+                    await self._send_onebot_message(
+                        event,
+                        [self._video_segment(path, source_url, mode)],
+                    )
+                    if mode == "source":
+                        logger.info(f"Video/GIF sent via source URL for {path.name}")
+                    elif mode == "temp":
+                        logger.info(f"Video/GIF sent via temp media HTTP for {path.name}")
+                    return
+                except Exception as exc:
+                    if mode == "source":
+                        logger.warning(
+                            f"Video/GIF source URL send failed for {path.name}: {source_url} - {exc}"
+                        )
+                    elif mode == "temp":
+                        logger.warning(
+                            f"Video/GIF temp media HTTP send failed for {path.name} - {exc}"
+                        )
+
         use_stream = self.transfer_mode == "stream" or (
             self.transfer_mode == "auto" and path.stat().st_size >= self.stream_threshold_bytes
         )
@@ -336,6 +358,12 @@ class OneBotNapCatSender:
         modes.append("base64")
         return modes
 
+    def _video_send_modes(self) -> list[str]:
+        modes = ["source"]
+        if self.temp_media_server and self.temp_media_server.is_ready():
+            modes.append("temp")
+        return modes
+
     def _image_segment(self, path: Path, source_url: str, mode: str) -> dict[str, Any]:
         if mode == "source" and source_url:
             return {"type": "image", "data": {"file": source_url}}
@@ -355,6 +383,25 @@ class OneBotNapCatSender:
 
         encoded = base64.b64encode(path.read_bytes()).decode("ascii")
         return {"type": "image", "data": {"file": f"base64://{encoded}"}}
+
+    def _video_segment(self, path: Path, source_url: str, mode: str) -> dict[str, Any]:
+        if mode == "source" and source_url:
+            return {"type": "video", "data": {"file": source_url}}
+
+        if mode == "temp" and self.temp_media_server is not None:
+            mime_type = mimetypes.guess_type(str(path))[0] or "video/mp4"
+            temp_url = self.temp_media_server.create_temp_url(
+                path,
+                mime_type,
+                ttl_seconds=self.temp_media_ttl_seconds,
+            )
+            if temp_url:
+                return {"type": "video", "data": {"file": temp_url}}
+            logger.warning(
+                f"Temp media URL creation failed for {path.name}, falling back to local/stream video send"
+            )
+
+        raise RuntimeError(f"unsupported video send mode: {mode}")
 
     @staticmethod
     def _plain_segment(text: str) -> dict[str, Any]:
