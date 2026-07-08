@@ -166,7 +166,7 @@
       "enable_temp_media_http_server": {
         "description": "启动临时媒体 HTTP 服务",
         "type": "bool",
-        "hint": "开启后，插件会在 AstrBot 容器内启动一个额外的小型 HTTP 服务，专门供 NapCat 拉取临时图片。",
+        "hint": "开启后，插件会启动一个额外的小型 HTTP 服务，专门供 NapCat 拉取临时图片。",
         "default": true
       },
       "temp_media_http_host": {
@@ -189,7 +189,7 @@
       "temp_media_base_url": {
         "description": "HTTP 临时媒体基地址",
         "type": "string",
-        "hint": "NapCat 可直接访问到的 AstrBot HTTP 地址。默认适用于 docker compose 桥接网络场景。",
+        "hint": "NapCat 可直接访问到的临时媒体服务地址，应指向插件自己启动的临时媒体 HTTP 服务，例如 http://astrbot:6190。",
         "default": "http://astrbot:6190"
       },
       "temp_media_path_prefix": {
