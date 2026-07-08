@@ -158,15 +158,9 @@
         "default": true
       },
       "enable_temp_media_http_fallback": {
-        "description": "启用 HTTP 临时媒体兜底",
+        "description": "启用 HTTP 临时媒体服务与兜底",
         "type": "bool",
-        "hint": "仅用于图片发送兜底。发送顺序为：原始图片 URL -> HTTP 临时 URL -> base64://。",
-        "default": true
-      },
-      "enable_temp_media_http_server": {
-        "description": "启动临时媒体 HTTP 服务",
-        "type": "bool",
-        "hint": "开启后，插件会启动一个额外的小型 HTTP 服务，专门供 NapCat 拉取临时图片。",
+        "hint": "开启后，插件会启动内置临时媒体 HTTP 服务，并在媒体发送时尝试原始 URL -> HTTP 临时 URL -> 后备链路。",
         "default": true
       },
       "temp_media_http_host": {

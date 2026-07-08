@@ -160,11 +160,6 @@ class XParserPlugin(Star):
             port=temp_media_http_port,
             enabled=bool(
                 self._cfg(
-                    "send.enable_temp_media_http_server",
-                    True,
-                    "enable_temp_media_http_server",
-                )
-                and self._cfg(
                     "send.enable_temp_media_http_fallback",
                     True,
                     "enable_temp_media_http_fallback",
