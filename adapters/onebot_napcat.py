@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import mimetypes
 from pathlib import Path
 from typing import Any
 
@@ -8,6 +9,7 @@ from astrbot.api import logger
 from astrbot.core.message.components import Image, Plain, Video
 
 from ..core.napcat_stream_client import NapCatStreamClient
+from ..core.temp_media_server import TempMediaServer
 
 
 class OneBotNapCatSender:
@@ -22,6 +24,8 @@ class OneBotNapCatSender:
         merge_text_and_images: bool,
         max_merged_images: int,
         send_video_as_file: bool,
+        temp_media_server: TempMediaServer | None = None,
+        temp_media_ttl_seconds: int = 300,
     ):
         self.stream_client = stream_client
         self.transfer_mode = transfer_mode
@@ -31,34 +35,36 @@ class OneBotNapCatSender:
         self.merge_text_and_images = merge_text_and_images
         self.max_merged_images = max_merged_images
         self.send_video_as_file = send_video_as_file
+        self.temp_media_server = temp_media_server
+        self.temp_media_ttl_seconds = temp_media_ttl_seconds
 
     async def send_tweet_media(
         self,
         event: Any,
         text: str,
-        image_paths: list[Path],
+        image_items: list[tuple[Path, str]],
         videos: list[tuple[Path, str]],
     ) -> None:
-        if not image_paths and not videos:
+        if not image_items and not videos:
             await event.send(event.chain_result([Plain(text)]))
             return
 
-        if self.send_mode == "forward" and (image_paths or videos):
-            if await self._send_forward_message(event, text, image_paths, len(videos)):
-                pass
-            else:
-                logger.warning("Forward message send failed or unsupported, falling back to normal message mode")
+        if self.send_mode == "forward" and (image_items or videos):
+            if not await self._send_forward_message(event, text, image_items, len(videos)):
+                logger.warning(
+                    "Forward message send failed or unsupported, falling back to normal message mode"
+                )
                 await self._send_ordinary_tweet_message(
                     event,
                     text,
-                    image_paths,
+                    image_items,
                     prefer_merged=self.merge_text_and_images,
                 )
         else:
             await self._send_ordinary_tweet_message(
                 event,
                 text,
-                image_paths,
+                image_items,
                 prefer_merged=self.merge_text_and_images,
             )
 
@@ -69,16 +75,16 @@ class OneBotNapCatSender:
         self,
         event: Any,
         text: str,
-        image_paths: list[Path],
+        image_items: list[tuple[Path, str]],
         *,
         prefer_merged: bool,
     ) -> None:
-        if image_paths:
+        if image_items:
             if prefer_merged:
-                await self._send_text_with_images(event, text, image_paths)
+                await self._send_text_with_images(event, text, image_items)
             else:
                 await event.send(event.chain_result([Plain(text)]))
-                await self._send_images(event, image_paths)
+                await self._send_images(event, image_items)
             return
 
         await event.send(event.chain_result([Plain(text)]))
@@ -87,82 +93,112 @@ class OneBotNapCatSender:
         self,
         event: Any,
         text: str,
-        image_paths: list[Path],
+        image_items: list[tuple[Path, str]],
         video_count: int,
     ) -> bool:
         if not NapCatStreamClient.is_aiocqhttp_event(event):
             return False
 
-        nodes: list[dict[str, Any]] = [self._forward_node([self._plain_segment(text)])]
-        for index, path in enumerate(image_paths, start=1):
-            nodes.append(
-                self._forward_node(
-                    [
-                        self._plain_segment(f"图片 {index}/{len(image_paths)}"),
-                        self._image_segment(path),
-                    ]
+        for mode in self._image_send_modes():
+            nodes: list[dict[str, Any]] = [self._forward_node([self._plain_segment(text)])]
+            for index, item in enumerate(image_items, start=1):
+                nodes.append(
+                    self._forward_node(
+                        [
+                            self._plain_segment(f"图片 {index}/{len(image_items)}"),
+                            self._image_segment(item[0], item[1], mode),
+                        ]
+                    )
                 )
-            )
 
-        if video_count:
-            nodes.append(
-                self._forward_node(
-                    [
-                        self._plain_segment(
-                            f"视频/GIF 共 {video_count} 个，将在合并转发消息后单独发送。"
-                        )
-                    ]
+            if video_count:
+                nodes.append(
+                    self._forward_node(
+                        [
+                            self._plain_segment(
+                                f"视频/GIF 共 {video_count} 个，将在合并转发消息后单独发送。"
+                            )
+                        ]
+                    )
                 )
-            )
 
-        try:
-            await self._send_onebot_forward(event, nodes)
-            return True
-        except Exception as exc:
-            logger.warning(f"OneBot forward message send failed: {exc}")
-            return False
+            try:
+                await self._send_onebot_forward(event, nodes)
+                return True
+            except Exception as exc:
+                logger.warning(f"OneBot forward image send failed in mode {mode}: {exc}")
+                continue
+        return False
 
     async def _send_text_with_images(
         self,
         event: Any,
         text: str,
-        image_paths: list[Path],
+        image_items: list[tuple[Path, str]],
     ) -> None:
-        if not image_paths:
+        if not image_items:
             await event.send(event.chain_result([Plain(text)]))
             return
 
-        merge_count = max(0, min(self.max_merged_images, len(image_paths)))
-        merged_paths = image_paths[:merge_count]
-        remaining_paths = image_paths[merge_count:]
+        merge_count = max(0, min(self.max_merged_images, len(image_items)))
+        merged_items = image_items[:merge_count]
+        remaining_items = image_items[merge_count:]
 
         if NapCatStreamClient.is_aiocqhttp_event(event):
-            await self._send_onebot_message(
-                event,
-                [self._plain_segment(text), *[self._image_segment(path) for path in merged_paths]],
-            )
+            sent = False
+            for mode in self._image_send_modes():
+                try:
+                    await self._send_onebot_message(
+                        event,
+                        [
+                            self._plain_segment(text),
+                            *[
+                                self._image_segment(path, source_url, mode)
+                                for path, source_url in merged_items
+                            ],
+                        ],
+                    )
+                    sent = True
+                    break
+                except Exception as exc:
+                    logger.warning(
+                        f"Merged OneBot image send failed in mode {mode}: {exc}"
+                    )
+            if not sent:
+                await event.send(event.chain_result([Plain(text)]))
+                await self._send_images(event, merged_items)
         else:
-            components = [Plain(text), *[Image.fromFileSystem(str(path)) for path in merged_paths]]
+            components = [Plain(text), *[Image.fromFileSystem(str(path)) for path, _ in merged_items]]
             await event.send(event.chain_result(components))
 
-        if remaining_paths:
-            await self._send_images(event, remaining_paths)
+        if remaining_items:
+            await self._send_images(event, remaining_items)
 
     async def _send_images(
         self,
         event: Any,
-        image_paths: list[Path],
+        image_items: list[tuple[Path, str]],
     ) -> None:
         if NapCatStreamClient.is_aiocqhttp_event(event):
-            for path in image_paths:
-                try:
-                    await self._send_onebot_message(event, [self._image_segment(path)])
-                except Exception as exc:
-                    logger.warning(f"OneBot base64 image send failed: {path} - {exc}")
+            for path, source_url in image_items:
+                sent = False
+                for mode in self._image_send_modes():
+                    try:
+                        await self._send_onebot_message(
+                            event,
+                            [self._image_segment(path, source_url, mode)],
+                        )
+                        sent = True
+                        break
+                    except Exception as exc:
+                        logger.warning(
+                            f"OneBot image send failed for {path.name} in mode {mode}: {exc}"
+                        )
+                if not sent:
                     await event.send(event.chain_result([Plain(f"图片发送失败：{path.name}")]))
             return
 
-        image_components = [Image.fromFileSystem(str(path)) for path in image_paths]
+        image_components = [Image.fromFileSystem(str(path)) for path, _ in image_items]
         await event.send(event.chain_result(image_components))
 
     async def _send_onebot_message(
@@ -251,7 +287,9 @@ class OneBotNapCatSender:
                 await event.send(event.chain_result([Video.fromFileSystem(str(path))]))
                 return
         except Exception as exc:
-            logger.warning(f"Video component send failed, trying stream fallback: {source_url} - {exc}")
+            logger.warning(
+                f"Video component send failed, trying stream fallback: {source_url} - {exc}"
+            )
 
         if await self.stream_client.upload_stream_then_send_video(
             event,
@@ -262,14 +300,33 @@ class OneBotNapCatSender:
 
         await event.send(event.chain_result([Plain(f"视频发送失败，原始直链：{source_url}")]))
 
+    def _image_send_modes(self) -> list[str]:
+        modes = ["source"]
+        if self.temp_media_server and self.temp_media_server.is_ready():
+            modes.append("temp")
+        modes.append("base64")
+        return modes
+
+    def _image_segment(self, path: Path, source_url: str, mode: str) -> dict[str, Any]:
+        if mode == "source" and source_url:
+            return {"type": "image", "data": {"file": source_url}}
+
+        if mode == "temp" and self.temp_media_server is not None:
+            mime_type = mimetypes.guess_type(str(path))[0] or "image/jpeg"
+            temp_url = self.temp_media_server.create_temp_url(
+                path,
+                mime_type,
+                ttl_seconds=self.temp_media_ttl_seconds,
+            )
+            if temp_url:
+                return {"type": "image", "data": {"file": temp_url}}
+
+        encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+        return {"type": "image", "data": {"file": f"base64://{encoded}"}}
+
     @staticmethod
     def _plain_segment(text: str) -> dict[str, Any]:
         return {"type": "text", "data": {"text": text}}
-
-    @staticmethod
-    def _image_segment(path: Path) -> dict[str, Any]:
-        encoded = base64.b64encode(path.read_bytes()).decode("ascii")
-        return {"type": "image", "data": {"file": f"base64://{encoded}"}}
 
     @staticmethod
     async def _call_onebot_action(bot: Any, action: str, **payload: Any) -> Any:

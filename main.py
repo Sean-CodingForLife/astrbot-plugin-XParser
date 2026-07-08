@@ -19,6 +19,8 @@ from .core.access_control import (
 )
 from .core.media_processor import MediaProcessor
 from .core.napcat_stream_client import NapCatStreamClient
+from .core.temp_media_registry import TempMediaRegistry
+from .core.temp_media_server import TempMediaServer
 from .core.x_api_client import XApiClient
 from .models.x_response_models import TweetResponse
 
@@ -66,34 +68,87 @@ class XParserPlugin(Star):
                 "auth.graphql_tweet_query_id", "", "graphql_tweet_query_id"
             ),
             enable_proxy=bool(self._cfg("network.enable_proxy", True, "enable_proxy")),
-            proxy_url=self._cfg("network.proxy_url", "http://127.0.0.1:7890", "proxy_url"),
+            proxy_url=self._cfg(
+                "network.proxy_url",
+                "http://127.0.0.1:7890",
+                "proxy_url",
+            ),
         )
         self.media_processor = MediaProcessor(
-            forward_threshold_mb=int(self._cfg("media.download_limit_mb", 100, "download_limit_mb")),
+            forward_threshold_mb=int(
+                self._cfg("media.download_limit_mb", 100, "download_limit_mb")
+            ),
             pil_compress_target_kb=int(
-                self._cfg("media.image_compress_target_kb", 2048, "image_compress_target_kb")
+                self._cfg(
+                    "media.image_compress_target_kb",
+                    2048,
+                    "image_compress_target_kb",
+                )
             ),
             image_compress_enabled=bool(
-                self._cfg("media.enable_image_compression", True, "enable_image_compression")
+                self._cfg(
+                    "media.enable_image_compression",
+                    True,
+                    "enable_image_compression",
+                )
             ),
             image_compress_mode=self._cfg(
-                "media.image_compress_mode", "target_size", "image_compress_mode"
+                "media.image_compress_mode",
+                "target_size",
+                "image_compress_mode",
             ),
             image_compress_quality=int(
                 self._cfg("media.image_compress_quality", 85, "image_compress_quality")
             ),
             video_variant_strategy=self._cfg(
-                "media.video_variant_strategy", "highest", "video_variant_strategy"
+                "media.video_variant_strategy",
+                "highest",
+                "video_variant_strategy",
             ),
             display_media_details=True,
             enable_proxy=bool(self._cfg("network.enable_proxy", True, "enable_proxy")),
-            proxy_url=self._cfg("network.proxy_url", "http://127.0.0.1:7890", "proxy_url"),
+            proxy_url=self._cfg(
+                "network.proxy_url",
+                "http://127.0.0.1:7890",
+                "proxy_url",
+            ),
         )
         self.stream_client = NapCatStreamClient(
-            max_bytes=int(self._cfg("send.stream_max_mb", 100, "stream_max_mb")) * 1024 * 1024
+            max_bytes=int(self._cfg("send.stream_max_mb", 100, "stream_max_mb"))
+            * 1024
+            * 1024
+        )
+        self.temp_media_registry = TempMediaRegistry()
+        self.temp_media_server = TempMediaServer(
+            self.temp_media_registry,
+            base_url=str(
+                self._cfg(
+                    "send.temp_media_base_url",
+                    "http://astrbot:6185",
+                    "temp_media_base_url",
+                )
+                or "http://astrbot:6185"
+            ),
+            path_prefix=str(
+                self._cfg(
+                    "send.temp_media_path_prefix",
+                    "/xparser/media",
+                    "temp_media_path_prefix",
+                )
+                or "/xparser/media"
+            ),
+            enabled=bool(
+                self._cfg(
+                    "send.enable_temp_media_http_fallback",
+                    True,
+                    "enable_temp_media_http_fallback",
+                )
+            ),
         )
         self.stream_threshold_bytes = (
-            int(self._cfg("send.stream_threshold_mb", 8, "stream_threshold_mb")) * 1024 * 1024
+            int(self._cfg("send.stream_threshold_mb", 8, "stream_threshold_mb"))
+            * 1024
+            * 1024
         )
         transfer_mode = self._normalize_transfer_mode(
             self._cfg("send.media_transfer_mode", "auto", "media_transfer_mode")
@@ -102,7 +157,11 @@ class XParserPlugin(Star):
             self._cfg("parse.enable_auto_parse", True, "enable_auto_parse")
         )
         self.tweet_text_template = str(
-            self._cfg("parse.tweet_text_template", DEFAULT_TWEET_TEXT_TEMPLATE, "tweet_text_template")
+            self._cfg(
+                "parse.tweet_text_template",
+                DEFAULT_TWEET_TEXT_TEMPLATE,
+                "tweet_text_template",
+            )
             or DEFAULT_TWEET_TEXT_TEMPLATE
         )
         self.access_control = AccessControl(
@@ -120,7 +179,9 @@ class XParserPlugin(Star):
                         )
                     ),
                 ),
-                acl_mode=normalize_acl_mode(self._cfg("access.acl_mode", "关闭", "acl_mode")),
+                acl_mode=normalize_acl_mode(
+                    self._cfg("access.acl_mode", "关闭", "acl_mode")
+                ),
                 allowed_group_ids=normalize_id_set(
                     self._cfg("access.allowed_group_ids", [], "allowed_group_ids")
                 ),
@@ -163,14 +224,31 @@ class XParserPlugin(Star):
             send_video_as_file=bool(
                 self._cfg("send.send_video_as_file", True, "send_video_as_file")
             ),
+            temp_media_server=self.temp_media_server,
+            temp_media_ttl_seconds=int(
+                self._cfg(
+                    "send.temp_media_ttl_seconds",
+                    300,
+                    "temp_media_ttl_seconds",
+                )
+            ),
         )
-        self.cache_ttl_hours = int(self._cfg("media.cache_ttl_hours", 24, "cache_ttl_hours"))
+        self.cache_ttl_hours = int(
+            self._cfg("media.cache_ttl_hours", 24, "cache_ttl_hours")
+        )
         self.cache_dir: Path = StarTools.get_data_dir("astrbot_plugin_xparser")
         self.image_dir = self.cache_dir / "images"
         self.video_dir = self.cache_dir / "videos"
         for directory in (self.image_dir, self.video_dir):
             directory.mkdir(parents=True, exist_ok=True)
         self._cleanup_cache()
+
+    async def initialize(self):
+        try:
+            await self.temp_media_server.setup(self.context)
+        except Exception as exc:
+            logger.warning(f"Temp media HTTP fallback setup skipped: {exc}")
+        self.temp_media_registry.cleanup_expired()
 
     def _cfg(self, key: str, default: Any, legacy_key: str | None = None) -> Any:
         missing = object()
@@ -195,7 +273,11 @@ class XParserPlugin(Star):
     async def cmd_parse(self, event: AstrMessageEvent, url: str = ""):
         tweet_id = self._extract_tweet_id(url or event.message_str)
         if not tweet_id:
-            await event.send(event.chain_result([Plain("请发送推文链接，例如 /xparse https://x.com/user/status/123")]))
+            await event.send(
+                event.chain_result(
+                    [Plain("请发送推文链接，例如 /xparse https://x.com/user/status/123")]
+                )
+            )
             return
         if not await self._can_parse_event(event, tweet_id, silent=False):
             return
@@ -255,7 +337,11 @@ class XParserPlugin(Star):
 
     def _format_tweet(self, response: TweetResponse) -> str:
         tweet = response.data
-        author = response.includes.get_author_display(tweet.author_id) if response.includes else None
+        author = (
+            response.includes.get_author_display(tweet.author_id)
+            if response.includes
+            else None
+        )
         if author:
             author_line = f"@{author['username']} ({author['name']})"
             author_name = author["name"]
@@ -325,7 +411,7 @@ class XParserPlugin(Star):
             await event.send(event.chain_result([Plain(text)]))
             return
 
-        image_paths: list[Path] = []
+        image_items: list[tuple[Path, str]] = []
         videos: list[tuple[Path, str]] = []
 
         for key in tweet.attachments.media_keys:
@@ -335,17 +421,17 @@ class XParserPlugin(Star):
             if media.type == "photo" and media.url:
                 image_path = await self._download_image(tweet.id, media.url)
                 if image_path:
-                    image_paths.append(image_path)
+                    image_items.append((image_path, media.url))
             elif media.type in ("video", "animated_gif") and media.url:
                 video_path = await self._download_video(tweet.id, media.url)
                 if video_path:
                     videos.append((video_path, media.url))
 
-        if not image_paths and not videos:
+        if not image_items and not videos:
             await event.send(event.chain_result([Plain(text)]))
             return
 
-        await self.sender.send_tweet_media(event, text, image_paths, videos)
+        await self.sender.send_tweet_media(event, text, image_items, videos)
 
     async def _download_image(self, tweet_id: str, url: str) -> Path | None:
         try:
