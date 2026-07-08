@@ -51,7 +51,6 @@ class XParserPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
         self.config = config
-        self._maybe_migrate_temp_media_base_url_config()
         self.api_client = XApiClient(
             bearer_token=self._cfg("auth.api_bearer_token", "", "api_bearer_token"),
             api_key=self._cfg("auth.api_key", "", "api_key"),
@@ -271,6 +270,7 @@ class XParserPlugin(Star):
         self._cleanup_cache()
 
     async def initialize(self):
+        self._warn_temp_media_base_url_config()
         try:
             await self.temp_media_server.setup()
         except Exception as exc:
@@ -300,52 +300,8 @@ class XParserPlugin(Star):
         except AttributeError:
             return default
 
-    def _set_cfg(self, key: str, value: Any, legacy_key: str | None = None) -> bool:
-        try:
-            current: Any = self.config
-            parts = key.split(".")
-            for part in parts[:-1]:
-                child = None
-                getter = getattr(current, "get", None)
-                if getter is not None:
-                    child = getter(part, None)
-                elif isinstance(current, dict):
-                    child = current.get(part)
-                if child is None:
-                    if isinstance(current, dict):
-                        current[part] = {}
-                        child = current[part]
-                    else:
-                        return False
-                current = child
-
-            last = parts[-1]
-            setter = getattr(current, "set", None)
-            if setter is not None:
-                setter(last, value)
-                return True
-            if isinstance(current, dict):
-                current[last] = value
-                return True
-            if hasattr(current, "__setitem__"):
-                current[last] = value
-                return True
-
-            if legacy_key:
-                root_setter = getattr(self.config, "set", None)
-                if root_setter is not None:
-                    root_setter(legacy_key, value)
-                    return True
-                if isinstance(self.config, dict):
-                    self.config[legacy_key] = value
-                    return True
-            return False
-        except Exception as exc:
-            logger.debug(f"Temp media config migration skipped: {exc}")
-            return False
-
-    def _maybe_migrate_temp_media_base_url_config(self) -> None:
-        current_value = str(
+    def _warn_temp_media_base_url_config(self) -> None:
+        raw_value = str(
             self._cfg(
                 "send.temp_media_base_url",
                 "",
@@ -353,15 +309,20 @@ class XParserPlugin(Star):
             )
             or ""
         ).strip()
-        if current_value not in {"http://astrbot:6185", "http://astrbot:6190"}:
+        if not raw_value:
             return
-        if self._set_cfg(
-            "send.temp_media_base_url",
-            "http://astrbot",
-            legacy_key="temp_media_base_url",
-        ):
-            logger.info(
-                "Migrated temp_media_base_url from legacy fixed-port value to http://astrbot"
+        parsed = urlparse(raw_value)
+        if not parsed.scheme or not parsed.netloc:
+            logger.warning(
+                "Invalid temp_media_base_url detected: "
+                f"{raw_value}. Prefer using a full URL such as http://astrbot."
+            )
+            return
+        if parsed.port is not None:
+            logger.warning(
+                "Explicit port detected in temp_media_base_url: "
+                f"{raw_value}. Prefer using http://astrbot without an explicit port; "
+                "the plugin will append send.temp_media_http_port automatically."
             )
 
     @staticmethod

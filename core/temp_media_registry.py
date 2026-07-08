@@ -26,6 +26,7 @@ class TempMediaRegistry:
         ttl_seconds: int = 300,
         once: bool = False,
     ) -> str:
+        self.cleanup_expired()
         token = secrets.token_urlsafe(24)
         self._entries[token] = TempMediaEntry(
             file_path=Path(file_path),

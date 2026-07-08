@@ -1,52 +1,56 @@
-# Changelog
+# 更新日志
 
-All notable changes to this project will be documented in this file.
+本文档记录 `astrbot-plugin-XParser` 的主要变更。
 
 ## [0.1.0] - 2026-07-08
 
-### Added
+### 新增
 
-- Initial AstrBot plugin implementation for X/Twitter tweet parsing.
-- Automatic tweet URL detection for `x.com` and `twitter.com` status links.
-- `/xparse <tweet-url>` command.
-- X API v2 integration with Bearer Token and OAuth 1.0a support.
-- Cookie GraphQL fallback for API quota or permission failures.
-- Tweet text, author, timestamp, metrics, image, video, and GIF extraction.
-- Image download and compression pipeline.
-- OneBot `base64://` image sending for NapCat/aiocqhttp deployments.
-- NapCat Stream API upload support for cross-container video transfer.
-- Streamed video sending as OneBot video messages.
-- File upload fallback when video message sending fails.
-- Chinese configuration descriptions for AstrBot WebUI.
-- Cache TTL cleanup on plugin startup/reload.
-- Text and image merged sending option to reduce chat noise.
-- Configurable image compression enablement, mode, quality, and target size.
-- Configurable video variant selection strategy.
-- Configurable tweet text output template.
-- README compatibility matrix for AstrBot, aiocqhttp/OneBot, NapCat, QQ chat scenes, and supported tweet URL sources.
-- Configurable message style selector for normal messages or QQ forward messages, plus a separate text-image merge switch.
-- Per-session parse cooldown, same-tweet repeat cooldown, and group/private allowlist/blocklist access control.
+- 初版 AstrBot 插件框架，支持解析 X/Twitter 推文链接
+- 自动识别 `x.com` 与 `twitter.com` 推文链接
+- `/xparse <tweet-url>` 手动解析命令
+- X API Bearer Token / OAuth 1.0a / Cookie GraphQL 降级解析
+- 推文文字、作者、时间、互动数据、图片、视频、GIF 提取
+- 图片下载与压缩流程
+- NapCat Stream API 视频上传与发送
+- 视频消息失败后的文件回退能力
+- 会话冷却、重复推文冷却、黑白名单访问控制
+- 可配置的推文输出模板
+- 可配置的图片压缩、视频变体选择、本地缓存保留时间
 
-### Fixed
+### 发送链路
 
-- Fixed invalid plugin module name in `metadata.yaml`.
-- Added `repo` metadata so AstrBot can update the plugin from GitHub.
-- Fixed `/xparse` command handler accidentally becoming an async generator.
-- Avoided duplicate parsing when `/xparse` command messages are also seen by the auto parser.
-- Added raw OneBot action fallback for adapters exposing `call_action`, `call_api`, or `api`.
+- 图片发送改为三层回退：
+  - 原始图片 URL
+  - 临时媒体 HTTP URL
+  - `base64://`
+- 视频 / GIF 保持独立链路：
+  - 本地视频消息
+  - NapCat Stream API
+  - 文件回退
 
-### Changed
+### 临时媒体 HTTP 服务
 
-- Video transfer now prioritizes Stream API video message delivery before file fallback.
-- README expanded with architecture, configuration, troubleshooting, and roadmap notes.
-- Split access control and QQ/OneBot/NapCat message sending into dedicated modules for easier future platform adapters.
-- Grouped AstrBot WebUI settings by function, including authentication, parsing, sending, media processing, access control, and network settings.
-- Added a configurable QQ forward-message node sender name for merged forward messages.
-- Image sending now uses a three-stage fallback chain: original media URL, temporary HTTP media URL, then `base64://`.
-- Added optional temporary HTTP media serving for images, with configurable base URL, route prefix, and TTL.
+- 新增插件自建临时媒体 HTTP 服务
+- 支持临时 token、TTL、按路径返回文件流
+- 支持通过 `send.temp_media_http_host` 和 `send.temp_media_http_port` 配置监听地址与端口
+- `send.temp_media_base_url` 改为只表达访问主机地址，未显式填写端口时自动拼接 `temp_media_http_port`
+- 增加旧配置迁移：
+  - `http://astrbot:6185`
+  - `http://astrbot:6190`
+  - 会尝试迁正为 `http://astrbot`
 
-### Known Issues
+### 日志与排错
 
-- AstrBot local cache cleanup currently runs on plugin startup/reload, not as a background scheduled task.
-- NapCat Stream temporary files are not yet actively cleaned by the plugin after successful sending.
-- In `auto` mode, NapCat deployments may still try local video sending before Stream fallback.
+- 增加临时媒体 HTTP 服务启动失败日志
+- 增加图片 `source / temp HTTP / base64` 三层发送链路日志
+- 增加临时媒体 URL 生成失败日志
+- 增加 NapCat Stream 上传缺少 bot 客户端、文件不存在等提示日志
+
+### 文档
+
+- 重写 `README.md`，改为面向中文用户说明
+- 调整配置说明，明确：
+  - `6190` 是插件临时媒体 HTTP 服务端口
+  - `temp_media_base_url` 默认不再直接暴露端口
+  - 插件运行时会自动拼接端口

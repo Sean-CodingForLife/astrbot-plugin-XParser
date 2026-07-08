@@ -134,7 +134,8 @@ class OneBotNapCatSender:
                     logger.warning(f"Forward image source URL send failed: {exc}")
                 elif mode == "temp":
                     logger.warning(f"Forward image temp media HTTP send failed: {exc}")
-                logger.warning(f"OneBot forward image send failed in mode {mode}: {exc}")
+                if mode == "base64":
+                    logger.warning(f"Forward image base64 send failed: {exc}")
                 continue
         return False
 
@@ -177,9 +178,8 @@ class OneBotNapCatSender:
                         logger.warning(f"Merged image source URL send failed: {exc}")
                     elif mode == "temp":
                         logger.warning(f"Merged image temp media HTTP send failed: {exc}")
-                    logger.warning(
-                        f"Merged OneBot image send failed in mode {mode}: {exc}"
-                    )
+                    if mode == "base64":
+                        logger.warning(f"Merged image base64 send failed: {exc}")
             if not sent:
                 await event.send(event.chain_result([Plain(text)]))
                 await self._send_images(event, merged_items)
@@ -219,9 +219,10 @@ class OneBotNapCatSender:
                             logger.warning(
                                 f"Image temp media HTTP send failed for {path.name} - {exc}"
                             )
-                        logger.warning(
-                            f"OneBot image send failed for {path.name} in mode {mode}: {exc}"
-                        )
+                        if mode == "base64":
+                            logger.warning(
+                                f"Image base64 send failed for {path.name} - {exc}"
+                            )
                 if not sent:
                     await event.send(event.chain_result([Plain(f"图片发送失败：{path.name}")]))
             return
