@@ -101,6 +101,23 @@
         "hint": "选择“合并转发”发送样式时显示的发送者名称。",
         "default": "X 推文解析"
       },
+      "forward_node_uin_mode": {
+        "description": "合并转发节点 UIN 策略",
+        "type": "string",
+        "hint": "bot：优先使用机器人自身 QQ 号，最稳妥；fixed：使用下方自定义 UIN，但可能导致头像异常、显示异常或风控风险；default：固定使用 10000。",
+        "default": "bot",
+        "options": [
+          "bot",
+          "fixed",
+          "default"
+        ]
+      },
+      "forward_node_uin": {
+        "description": "合并转发节点 UIN",
+        "type": "string",
+        "hint": "仅在合并转发节点 UIN 策略为 fixed 时使用。客户端通常会根据这个 UIN 决定节点头像，不建议随意填写陌生 QQ 号。",
+        "default": "10000"
+      },
       "merge_text_and_images": {
         "description": "合并发送文字和图片",
         "type": "bool",

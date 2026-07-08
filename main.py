@@ -231,6 +231,14 @@ class XParserPlugin(Star):
                 self._cfg("send.forward_node_name", "X 推文解析", "forward_node_name")
                 or "X 推文解析"
             ),
+            forward_node_uin_mode=str(
+                self._cfg("send.forward_node_uin_mode", "bot", "forward_node_uin_mode")
+                or "bot"
+            ),
+            forward_node_uin=str(
+                self._cfg("send.forward_node_uin", "10000", "forward_node_uin")
+                or "10000"
+            ),
             merge_text_and_images=bool(
                 self._cfg("send.merge_text_and_images", True, "merge_text_and_images")
             ),

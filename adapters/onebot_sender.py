@@ -21,6 +21,8 @@ class OneBotSender:
         stream_threshold_bytes: int,
         send_mode: str,
         forward_node_name: str,
+        forward_node_uin_mode: str,
+        forward_node_uin: str,
         merge_text_and_images: bool,
         max_merged_images: int,
         send_video_as_file: bool,
@@ -32,6 +34,10 @@ class OneBotSender:
         self.stream_threshold_bytes = stream_threshold_bytes
         self.send_mode = send_mode
         self.forward_node_name = forward_node_name.strip() or "X 推文解析"
+        self.forward_node_uin_mode = self._normalize_forward_node_uin_mode(
+            forward_node_uin_mode
+        )
+        self.forward_node_uin = forward_node_uin.strip() or "10000"
         self.merge_text_and_images = merge_text_and_images
         self.max_merged_images = max_merged_images
         self.send_video_as_file = send_video_as_file
@@ -99,15 +105,19 @@ class OneBotSender:
         if not OneBotStreamClient.is_aiocqhttp_event(event):
             return False
 
+        forward_node_uin = self._resolve_forward_node_uin(event)
         for mode in self._image_send_modes():
-            nodes: list[dict[str, Any]] = [self._forward_node([self._plain_segment(text)])]
+            nodes: list[dict[str, Any]] = [
+                self._forward_node([self._plain_segment(text)], forward_node_uin)
+            ]
             for index, item in enumerate(image_items, start=1):
                 nodes.append(
                     self._forward_node(
                         [
                             self._plain_segment(f"图片 {index}/{len(image_items)}"),
                             self._image_segment(item[0], item[1], mode),
-                        ]
+                        ],
+                        forward_node_uin,
                     )
                 )
 
@@ -118,7 +128,8 @@ class OneBotSender:
                             self._plain_segment(
                                 f"视频/GIF 共 {video_count} 个，将在合并转发消息后单独发送。"
                             )
-                        ]
+                        ],
+                        forward_node_uin,
                     )
                 )
 
@@ -285,15 +296,71 @@ class OneBotSender:
                 messages=messages,
             )
 
-    def _forward_node(self, content: list[dict[str, Any]]) -> dict[str, Any]:
+    def _forward_node(self, content: list[dict[str, Any]], uin: str) -> dict[str, Any]:
         return {
             "type": "node",
             "data": {
                 "name": self.forward_node_name,
-                "uin": "10000",
+                "uin": uin,
                 "content": content,
             },
         }
+
+    def _resolve_forward_node_uin(self, event: Any) -> str:
+        if self.forward_node_uin_mode == "fixed":
+            if not self.forward_node_uin.isdigit():
+                logger.warning(
+                    "合并转发节点 UIN 配置无效：fixed 模式下 send.forward_node_uin 必须是纯数字，"
+                    "将回退到机器人自身 QQ 号或默认值 10000。"
+                )
+            else:
+                logger.warning(
+                    f"合并转发节点正在使用固定 UIN：{self.forward_node_uin}。"
+                    "固定 UIN 可能导致头像异常、显示异常或风控风险。"
+                )
+                return self.forward_node_uin
+
+        if self.forward_node_uin_mode == "default":
+            return "10000"
+
+        bot = getattr(event, "bot", None)
+        for attr in ("self_id", "uin", "qq", "user_id"):
+            value = getattr(bot, attr, None)
+            if value is not None:
+                text = str(value).strip()
+                if text.isdigit():
+                    return text
+
+        for getter in ("get_self_id", "get_login_info"):
+            method = getattr(bot, getter, None)
+            if method is None:
+                continue
+            try:
+                result = method()
+                if hasattr(result, "__await__"):
+                    logger.warning(
+                        "无法同步获取机器人自身 QQ 号，合并转发节点 UIN 将回退到默认值 10000。"
+                    )
+                    break
+                if isinstance(result, dict):
+                    for key in ("user_id", "uin", "qq", "self_id"):
+                        value = result.get(key)
+                        if value is not None and str(value).strip().isdigit():
+                            return str(value).strip()
+            except Exception:
+                continue
+
+        logger.warning(
+            "无法获取机器人自身 QQ 号，合并转发节点 UIN 将回退到默认值 10000。"
+        )
+        return "10000"
+
+    @staticmethod
+    def _normalize_forward_node_uin_mode(value: str) -> str:
+        mode = (value or "").strip().lower()
+        if mode in {"bot", "fixed", "default"}:
+            return mode
+        return "bot"
 
     async def _send_video(self, event: Any, path: Path, source_url: str) -> None:
         if OneBotStreamClient.is_aiocqhttp_event(event):
