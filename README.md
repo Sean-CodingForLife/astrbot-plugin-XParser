@@ -1,160 +1,119 @@
 # astrbot-plugin-XParser
 
-XParser 是一个面向 AstrBot + NapCat 部署的 X/Twitter 推文解析插件。它可以自动识别聊天中的推文链接，提取推文文本、作者、时间、互动数据、图片、视频和 GIF，并通过 NapCat 发送到 QQ。
+XParser 是一个面向 AstrBot + NapCat 部署的 X/Twitter 推文解析插件。它可以自动识别聊天中的推文链接，提取推文文字、作者、时间、互动数据、图片、视频和 GIF，并发送到 QQ。
 
-本项目重点解决一个常见部署痛点：**AstrBot 和 NapCat 分别运行在不同容器中，且没有共享目录**。在这种情况下，传统的本地文件路径发送会失败，XParser 会使用 NapCat Stream API 将视频跨容器传递给 NapCat，再由 NapCat 发送视频消息。
+插件重点解决的就是 AstrBot 和 NapCat 分容器部署时的媒体发送问题，尤其是不共享文件目录时的跨容器传输。
 
-## 功能特性
+## 功能
 
-- 自动识别 `x.com/.../status/...` 和 `twitter.com/.../status/...` 推文链接。
-- 支持 `/xparse <推文链接>` 手动解析。
-- 提取推文文本、作者、发布时间、点赞/转发/回复数。
-- 支持图片、视频、GIF 媒体解析。
-- 推文文字摘要支持自定义输出模板。
-- 图片在 NapCat/OneBot 场景下使用 `base64://` 发送，避免共享目录依赖。
-- 支持普通消息、QQ 合并转发两种发送样式，并可单独控制图文是否合并。
-- 图片压缩可配置：是否启用、目标大小、固定质量或目标体积模式。
-- 视频质量可配置：在 X/Twitter 提供的 MP4 变体中选择最高、中等或最低体积。
-- 视频优先通过 NapCat `upload_file_stream` 跨容器传输，再作为 QQ 视频消息发送。
-- 视频消息失败时可自动退化为群文件/私聊文件。
-- 支持 X API Bearer Token、OAuth 1.0a、Cookie GraphQL 降级解析。
-- 带有本地缓存 TTL 清理机制。
+- 自动识别 `x.com/.../status/...` 和 `twitter.com/.../status/...`
+- 支持 `/xparse <tweet-url>` 手动解析
+- 提取推文文本、作者、发布时间、点赞/转发/回复数
+- 支持图片、视频、GIF 解析
+- 支持 X API Bearer Token、OAuth 1.0a、Cookie GraphQL 降级解析
+- 支持普通消息和 QQ 合并转发两种发送样式
+- 支持图片压缩、视频变体择优、本地缓存 TTL 清理
+- 支持会话冷却、重复推文冷却、群聊/私聊白名单与黑名单
+
+## 当前媒体发送链路
+
+### 图片
+
+图片现在按三层顺序发送：
+
+1. 原始图片 URL 直发
+2. HTTP 临时媒体 URL 兜底
+3. `base64://` 最终兜底
+
+说明：
+
+- HTTP 临时媒体仅用于图片
+- 如果 AstrBot 当前环境无法注册 HTTP 路由，或 NapCat 无法访问该地址，插件会自动跳过 HTTP 层
+- 默认提供 `temp_media_base_url = http://astrbot:6185`
+- 如需完全关闭 HTTP 兜底，可关闭 `enable_temp_media_http_fallback`
+
+### 视频 / GIF
+
+视频和 GIF 不走 HTTP 临时媒体服务，保持和当前实现一致：
+
+1. 根据 `media_transfer_mode` 选择本地发送或 Stream API 优先策略
+2. 失败后走 NapCat Stream API 上传
+3. 视频消息仍失败时，再按配置决定是否回退为群文件或私聊文件
 
 ## 适配范围
 
-| 项目 | 当前适配情况 |
+| 项目 | 当前情况 |
 |---|---|
 | 插件版本 | `v0.1.0` |
-| AstrBot | `>= 4.0.0`，当前开发与测试环境覆盖 AstrBot `v4.26.4` |
-| 适配器平台 | `aiocqhttp` / OneBot v11 |
-| QQ 客户端侧 | NapCatQQ，推荐 `v4.8.115+`，因为 Stream API 从该版本开始引入 |
-| 媒体发送链路 | 图片：OneBot `base64://`；视频/GIF：NapCat `upload_file_stream` + OneBot 视频消息 |
+| AstrBot | `>= 4.0.0` |
+| 适配器 | `aiocqhttp` / OneBot v11 |
+| QQ 侧 | NapCat |
 | 聊天场景 | QQ 群聊、QQ 私聊 |
-| 解析来源 | `x.com`、`twitter.com` 推文详情页链接 |
-| 部署方式 | 优先适配 AstrBot 与 NapCat 分容器、无共享目录的 Docker 部署；同机或共享目录部署可使用 `local` 模式 |
-
-当前没有专门适配 Telegram、Discord、微信、KOOK 等非 OneBot 平台。插件里的 Stream API 能力依赖 NapCat 的 OneBot action，因此其他 OneBot 实现即使能发文字和图片，也不一定支持视频跨容器上传。
+| 图片链路 | 原始 URL -> HTTP 临时 URL -> `base64://` |
+| 视频链路 | 本地视频组件 / NapCat `upload_file_stream` / 文件兜底 |
 
 ## 项目结构
 
 ```text
-main.py                         AstrBot 入口、命令监听、解析流程编排
-core/x_api_client.py             X/Twitter API 与 Cookie GraphQL 请求
-core/media_processor.py          媒体下载、图片压缩、视频变体选择
-core/access_control.py           冷却、群聊/私聊黑白名单
-core/napcat_stream_client.py     NapCat Stream API 分片上传
-adapters/onebot_napcat.py        QQ/OneBot/NapCat 消息发送适配器
-models/                          X/Twitter 响应数据模型
-```
-
-当前已经把“解析核心”和“QQ 发送适配”拆开。后续如果要扩展 Telegram、Discord、KOOK 等平台，优先新增对应 `adapters/` 发送器，而不是改动 X/Twitter 解析核心。
-
-## 工作原理
-
-```text
-QQ 消息
-  ↓
-AstrBot 事件监听
-  ↓
-提取推文 ID
-  ↓
-X API / Cookie GraphQL 获取推文详情
-  ↓
-发送文本摘要
-  ↓
-图片：下载 -> 压缩 -> base64:// -> OneBot 图片消息
-视频：下载 -> Stream API 分片上传 -> NapCat 临时路径 -> OneBot 视频消息
-```
-
-发送样式选择为 `普通消息` 且开启“合并发送文字和图片”后，图片推文会尽量按下面的形式发送：
-
-```text
-推文文字摘要 + 图片 1 + 图片 2 + ...
-```
-
-发送样式选择为 `合并转发` 后，插件会尝试发送 QQ 合并聊天记录：
-
-```text
-合并转发消息
-  节点 1：推文文字摘要
-  节点 2：图片 1
-  节点 3：图片 2
-  节点 4：视频/GIF 提示
-```
-
-视频仍会单独发送，因为 QQ/OneBot 对“文字 + 图片 + 视频”混合消息以及合并转发内的视频节点兼容性较差。如果合并转发发送失败，插件会自动退回普通消息样式；回退后是否图文合并，由“合并发送文字和图片”开关决定。
-
-### 为什么需要 Stream API
-
-如果 AstrBot 和 NapCat 在不同容器中，AstrBot 下载的视频路径类似：
-
-```text
-/AstrBot/data/plugin_data/astrbot_plugin_xparser/videos/xxx.mp4
-```
-
-NapCat 容器无法访问这个路径，因此普通本地文件发送会出现：
-
-```text
-ENOENT: no such file or directory
-```
-
-XParser 会将视频切成分片，通过 NapCat `upload_file_stream` 传给 NapCat。NapCat 合并后返回自己的临时路径，例如：
-
-```text
-/app/.config/QQ/NapCat/temp/xxx.mp4
-```
-
-随后插件再用该路径发送 OneBot `video` 消息。
-
-## 安装
-
-在 AstrBot 插件管理页面使用仓库地址安装：
-
-```text
-https://github.com/Sean-CodingForLife/astrbot-plugin-XParser.git
-```
-
-依赖由 AstrBot 插件系统根据 `requirements.txt` 安装：
-
-```text
-httpx[http2]>=0.26.0
-Pillow>=10.1.0
-pydantic>=2.5.0
+main.py                         AstrBot 入口与主流程
+core/x_api_client.py            X/Twitter API 与 Cookie GraphQL 请求
+core/media_processor.py         媒体下载、图片压缩、视频变体选择
+core/access_control.py          冷却、群聊/私聊黑白名单
+core/napcat_stream_client.py    NapCat Stream API 分片上传
+core/temp_media_registry.py     HTTP 临时媒体 token 注册表与 TTL
+core/temp_media_server.py       HTTP 临时媒体路由与文件流返回
+adapters/onebot_napcat.py       QQ/OneBot/NapCat 发送适配
+models/                         X/Twitter 响应模型
 ```
 
 ## 基本配置
 
-AstrBot 设置页已按功能分组，主要分为：
+优先配置这些项即可：
 
-- `认证设置`：X API、OAuth、Cookie GraphQL 降级解析凭据。
-- `解析设置`：自动解析开关、推文文字输出模板。
-- `发送设置`：发送样式、图文合并、NapCat Stream API、视频文件兜底。
-- `媒体处理`：图片压缩、视频质量选择、下载上限、本地缓存 TTL。
-- `冷却与访问控制`：冷却时间、群聊/私聊黑白名单。
-- `网络设置`：代理开关和代理地址。
+- `auth.api_bearer_token`
+- `auth.cookie_auth_token`
+- `auth.cookie_ct0`
+- `send.media_transfer_mode`
 
-推荐先填写：
+推荐默认值：
 
-- `认证设置` -> `X API Bearer Token`
-- `认证设置` -> `Cookie 降级认证：auth_token`
-- `认证设置` -> `Cookie 降级认证：ct0`
-- `发送设置` -> `媒体传输模式`: `auto`
+- `send.media_transfer_mode = auto`
+- `send.enable_temp_media_http_fallback = true`
+- `send.temp_media_base_url = http://astrbot:6185`
+- `send.temp_media_path_prefix = /xparser/media`
+- `send.temp_media_ttl_seconds = 300`
 
-如果你的 X API 额度不足，日志里出现：
+如果你的 compose 网络里 NapCat 可以通过 `http://astrbot:6185` 访问 AstrBot，那么图片 HTTP 兜底开箱即用。
+
+如果你的服务名或端口不同，修改：
 
 ```text
-API 返回 402（账户额度耗尽），尝试 Cookie 降级认证
+send.temp_media_base_url
 ```
 
-说明 Bearer/OAuth 额度已经不够，插件会使用 `auth_token` + `ct0` 走 Cookie GraphQL 降级。
+如果你不想使用 HTTP 兜底，关闭：
+
+```text
+send.enable_temp_media_http_fallback = false
+```
+
+## Docker / 容器说明
+
+默认 `temp_media_base_url` 使用的是：
+
+```text
+http://astrbot:6185
+```
+
+这表示：
+
+- `astrbot` 是 docker compose 服务名
+- `6185` 是 AstrBot 容器内监听端口
+- 这里用的是容器间网络地址，不是宿主机 `127.0.0.1:6185`
+
+如果你的容器内实际监听端口不是 `6185`，或者服务名不是 `astrbot`，按实际情况修改这个值。
 
 ## 输出模板
-
-配置项：
-
-```text
-解析设置 -> 推文文字输出模板
-```
 
 默认模板：
 
@@ -169,252 +128,77 @@ API 返回 402（账户额度耗尽），尝试 Cookie 降级认证
 
 可用占位符：
 
-| 占位符 | 含义 |
-|---|---|
-| `{author}` | 作者展示，例如 `@username (昵称)` |
-| `{author_name}` | 作者昵称 |
-| `{author_username}` | 作者用户名，不含 `@` |
-| `{tweet_id}` | 推文 ID |
-| `{text}` | 推文正文 |
-| `{created_at}` | 发布时间 |
-| `{like_count}` | 点赞数 |
-| `{retweet_count}` | 转发数 |
-| `{reply_count}` | 回复数 |
-| `{metrics_line}` | 已格式化的互动行 |
-| `{media_summary}` | 媒体摘要，例如 `2 张图片，1 个视频` |
-| `{media_summary_line}` | 已格式化的媒体摘要行 |
-| `{url}` | 推文链接 |
-
-如果模板里写了不存在的占位符，插件会回退到默认模板并写入日志。
+- `{author}`
+- `{author_name}`
+- `{author_username}`
+- `{tweet_id}`
+- `{text}`
+- `{created_at}`
+- `{like_count}`
+- `{retweet_count}`
+- `{reply_count}`
+- `{metrics_line}`
+- `{media_summary}`
+- `{media_summary_line}`
+- `{url}`
 
 ## 传输模式
 
-| 模式 | 说明 | 推荐场景 |
-|---|---|---|
-| `auto` | 小视频先尝试普通消息，失败或较大视频走 Stream API | 默认推荐 |
-| `stream` | 视频强制走 NapCat Stream API | AstrBot/NapCat 分容器且无共享目录 |
-| `local` | 只使用本地文件路径组件 | AstrBot 和 NapCat 同机或共享目录 |
+| 模式 | 说明 |
+|---|---|
+| `auto` | 小视频优先本地视频消息，较大视频或失败后走 Stream API |
+| `stream` | 视频强制优先走 Stream API |
+| `local` | 视频只走本地文件路径发送 |
 
-对当前双容器部署，推荐使用：
+对 AstrBot / NapCat 分容器部署，推荐：
 
 ```text
 auto
 ```
 
-如果你确定本地路径一定不可用，可以改为：
+## 已知事实
 
-```text
-stream
-```
-
-## 发送样式
-
-配置项：
-
-```text
-发送设置 -> 发送样式 = 普通消息 | 合并转发
-```
-
-| 样式 | 显示效果 | 说明 |
-|---|---|---|
-| `普通消息` | 普通 QQ 消息 | 兼容性最好。图片是否和文字合并，由 `merge_text_and_images` 开关决定。 |
-| `合并转发` | QQ 合并聊天记录 | 尝试把文字和图片作为多个节点展示；视频仍单独发送。失败时自动退回 `普通消息`。 |
-
-合并转发节点名称：
-
-```text
-发送设置 -> 合并转发节点名称 = X 推文解析
-```
-
-这个名称会显示在 QQ 合并转发消息的每个节点发送者位置。可以改成机器人昵称、插件名或你习惯的固定名称。
-
-图文合并开关：
-
-```text
-发送设置 -> 合并发送文字和图片 = true | false
-```
-
-开启后，普通消息样式会尽量把推文文字和图片放进同一条消息；关闭后，插件会先发文字，再逐张发送图片。视频/GIF 始终单独发送。
-
-## 冷却与访问控制
-
-冷却配置：
-
-| 配置项 | 默认值 | 说明 |
-|---|---|---|
-| `冷却与访问控制 -> 同一会话解析冷却` | `10` | 同一个群聊或同一个私聊，两次解析之间的最小间隔。 |
-| `冷却与访问控制 -> 同一推文重复解析冷却` | `120` | 同一个会话里重复解析同一条推文的最小间隔。 |
-
-自动解析触发冷却时会静默忽略，避免群聊继续刷屏；手动 `/xparse` 触发冷却时会提示剩余秒数。填 `0` 表示关闭对应冷却。
-
-访问控制配置：
-
-```text
-冷却与访问控制 -> 访问控制模式 = 关闭 | 白名单 | 黑名单
-```
-
-| 模式 | 说明 |
-|---|---|
-| `关闭` | 所有群聊和私聊都允许使用。 |
-| `白名单` | 只允许白名单里的群号/用户 QQ 使用；对应名单为空时不限制对应场景。 |
-| `黑名单` | 禁止黑名单里的群号/用户 QQ 使用。 |
-
-名单配置：
-
-| 配置项 | 填写内容 |
-|---|---|
-| `群聊白名单` | 填写允许使用的群号。 |
-| `私聊白名单` | 填写允许使用的用户 QQ。 |
-| `群聊黑名单` | 填写禁止使用的群号。 |
-| `私聊黑名单` | 填写禁止使用的用户 QQ。 |
-
-访问控制对自动解析和 `/xparse` 都生效。自动解析被访问控制拦截时会静默忽略，手动命令被拦截时会提示当前会话不在允许范围内。
-
-## 压缩策略
-
-### 图片压缩
-
-图片使用 Pillow/PIL 压缩，不依赖外部命令。
-
-支持两种模式：
-
-| 模式 | 说明 |
-|---|---|
-| `target_size` | 尽量压缩到目标 KB 以内，并保留满足体积要求的最高质量 |
-| `quality` | 按固定质量重新保存，不强求目标体积 |
-
-关键配置：
-
-- `媒体处理 -> 启用图片压缩`: 是否启用图片压缩。
-- `媒体处理 -> 图片压缩方式`: `target_size` 或 `quality`。
-- `媒体处理 -> 图片压缩质量`: 质量参数，范围 1-100，默认 85。
-- `媒体处理 -> 图片压缩目标大小`: 默认 2048KB。
-
-GIF 动图不会用 PIL 压缩，以避免破坏帧序列。
-
-### 视频质量选择
-
-当前版本**不会使用 ffmpeg 重新编码视频**。原因是 ffmpeg 会增加部署依赖、CPU 占用和发送延迟。
-
-插件会在 X/Twitter 返回的 MP4 variants 中选择一个直链：
-
-| 策略 | 说明 |
-|---|---|
-| `highest` | 选择最高码率，画质最好，体积最大 |
-| `balanced` | 选择中间档，画质和体积折中 |
-| `lowest` | 选择最低码率，体积最小，画质最低 |
-
-配置项：
-
-```text
-媒体处理 -> 视频质量选择策略 = highest | balanced | lowest
-```
-
-## 缓存策略
-
-AstrBot 侧缓存目录：
-
-```text
-/AstrBot/data/plugin_data/astrbot_plugin_xparser/images/
-/AstrBot/data/plugin_data/astrbot_plugin_xparser/videos/
-```
-
-默认配置：
-
-```text
-媒体处理 -> 本地缓存保留时间 = 24
-```
-
-插件启动或重载时会清理超过 TTL 的本地缓存。当前没有后台定时清理任务，后续会加入周期性清理。
-
-NapCat 侧 Stream API 临时文件通常位于 NapCat 自己的临时目录，例如：
-
-```text
-/app/.config/QQ/NapCat/temp/
-```
-
-后续计划在视频发送成功后调用 `clean_stream_temp_file` 主动清理。
+- 图片 HTTP 临时媒体服务已经落地，不再是规划项
+- HTTP 临时媒体服务当前只用于图片，不用于视频
+- HTTP 路由注册能力取决于当前 AstrBot 运行环境；如果不可用，插件会自动回退，不影响主链路
 
 ## 常见问题
 
-### 插件更新时报 repository URL 缺失
+### 为什么图片有时还是会走 `base64://`？
 
-旧版本 `metadata.yaml` 没有 `repo` 字段时，AstrBot 无法通过“更新插件”按钮找到下载地址。解决方式：
+因为三层链路是逐层尝试的：
 
-1. 卸载旧插件。
-2. 用仓库地址重新安装。
+- 原始 URL 发不出去
+- 或 HTTP 临时 URL 当前不可用
+- 最终才回退到 `base64://`
 
-新版本已经包含：
+这属于预期行为。
 
-```yaml
-repo: https://github.com/Sean-CodingForLife/astrbot-plugin-XParser
-```
+### 为什么视频没有走 HTTP 临时服务？
 
-### 插件更新时报 All connection attempts failed
+这是当前设计决定。视频仍按现有视频链路处理，没有接入 HTTP 临时媒体服务。
 
-这是 AstrBot 容器连接 GitHub 失败，不是插件代码问题。可以：
+### HTTP 临时媒体服务一定可用吗？
 
-- 重试更新。
-- 给 AstrBot 插件更新功能配置代理。
-- 确认容器内能访问 `github.com`。
+不一定。
 
-### 视频为什么先报 ENOENT 又成功
+它是兜底能力，不是硬依赖。只要下面任一条件不满足，就会自动跳过：
 
-在 `auto` 模式下，插件可能先尝试普通本地路径视频发送。双容器无共享目录时，这一步会失败：
+- AstrBot 运行环境支持挂载 HTTP 路由
+- NapCat 能访问 `temp_media_base_url`
 
-```text
-ENOENT: no such file or directory
-```
+## 状态
 
-随后插件会自动走 Stream API。只要后面出现：
+当前版本已经包含：
 
-```text
-NapCat Stream video sent as video message
-```
+- 推文文本解析
+- 图片解析与三层发送链路
+- 视频 / GIF 解析与 NapCat Stream API 兜底
+- Cookie GraphQL 降级
+- 访问控制与缓存清理
 
-就说明最终发送成功。
+后续如果继续扩展，优先方向会是：
 
-### 为什么视频比图片慢
-
-视频链路更长：
-
-```text
-下载视频 -> 写入缓存 -> 分片上传 NapCat -> NapCat 合并 -> QQ 发送视频
-```
-
-后续可优化方向：
-
-- 在 aiocqhttp/NapCat 平台下直接走 Stream API，跳过必定失败的本地路径尝试。
-- 调大 Stream 分片大小，减少请求次数。
-- 引入 AstrBot 临时 HTTP 服务，让 NapCat 直接拉取媒体。
-
-## 路线图
-
-- [ ] 视频在 NapCat 平台下可配置为直接 Stream，不再先尝试本地路径。
-- [ ] 视频发送成功后调用 `clean_stream_temp_file` 清理 NapCat 临时文件。
-- [ ] AstrBot 侧增加后台定时缓存清理任务。
-- [ ] 图片支持 URL 优先，失败后再退回 `base64://`。
-- [ ] 探索 AstrBot 临时 HTTP 媒体服务。
-- [ ] 探索 NapCat companion plugin，将媒体下载、发送、清理下沉到 NapCat 侧。
-
-### AstrBot 临时 HTTP 媒体服务
-
-这是一个未来重点方向。设计上，AstrBot 可以暴露短期有效的内网 HTTP URL，NapCat 从该 URL 拉取图片或视频。相比 `base64://`，它对图片更优雅；相比 Stream API，它对小文件更轻量。
-
-但这个方案需要额外处理：
-
-- URL 鉴权，避免媒体被外部访问。
-- TTL 和一次性 token。
-- Docker 网络连通性。
-- 下载完成后的缓存清理。
-
-## 项目状态
-
-当前版本仍处于早期迭代阶段，但核心链路已经验证：
-
-- 文本推文解析成功。
-- 图片推文解析和发送成功。
-- 视频推文通过 NapCat Stream API 发送为视频消息成功。
-- X API 额度耗尽时 Cookie GraphQL 降级成功。
-
-欢迎继续用真实群聊场景压测，尤其是大视频、多图、GIF、长文本推文和引用推文。
+- 补真实运行环境下的 HTTP 路由兼容性验证
+- 为图片 HTTP 兜底增加更明确的运行日志
+- 视需要再考虑视频 HTTP 方案

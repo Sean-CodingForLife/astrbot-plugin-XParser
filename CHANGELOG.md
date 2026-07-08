@@ -42,6 +42,8 @@ All notable changes to this project will be documented in this file.
 - Split access control and QQ/OneBot/NapCat message sending into dedicated modules for easier future platform adapters.
 - Grouped AstrBot WebUI settings by function, including authentication, parsing, sending, media processing, access control, and network settings.
 - Added a configurable QQ forward-message node sender name for merged forward messages.
+- Image sending now uses a three-stage fallback chain: original media URL, temporary HTTP media URL, then `base64://`.
+- Added optional temporary HTTP media serving for images, with configurable base URL, route prefix, and TTL.
 
 ### Known Issues
 
