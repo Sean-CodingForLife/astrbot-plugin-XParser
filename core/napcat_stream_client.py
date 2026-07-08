@@ -45,10 +45,12 @@ class NapCatStreamClient:
 
         bot = getattr(event, "bot", None)
         if bot is None:
+            logger.warning("NapCat Stream upload skipped: current event has no bot client")
             return None
 
         file_path = Path(file_path)
         if not file_path.is_file():
+            logger.warning(f"NapCat Stream upload skipped, file missing: {file_path}")
             return None
 
         size = file_path.stat().st_size

@@ -320,6 +320,9 @@ class OneBotNapCatSender:
             )
             if temp_url:
                 return {"type": "image", "data": {"file": temp_url}}
+            logger.warning(
+                f"Temp media URL creation failed for {path.name}, falling back to base64"
+            )
 
         encoded = base64.b64encode(path.read_bytes()).decode("ascii")
         return {"type": "image", "data": {"file": f"base64://{encoded}"}}

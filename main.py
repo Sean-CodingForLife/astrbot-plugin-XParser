@@ -267,7 +267,11 @@ class XParserPlugin(Star):
         try:
             await self.temp_media_server.setup()
         except Exception as exc:
-            logger.warning(f"Temp media HTTP fallback setup skipped: {exc}")
+            logger.warning(
+                "Temp media HTTP server failed to start on "
+                f"{self.temp_media_server.host}:{self.temp_media_server.port}: {exc}. "
+                "Please change send.temp_media_http_port and send.temp_media_base_url."
+            )
         self.temp_media_registry.cleanup_expired()
 
     def _cfg(self, key: str, default: Any, legacy_key: str | None = None) -> Any:
