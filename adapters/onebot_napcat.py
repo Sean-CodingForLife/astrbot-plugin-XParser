@@ -124,8 +124,16 @@ class OneBotNapCatSender:
 
             try:
                 await self._send_onebot_forward(event, nodes)
+                if mode == "temp":
+                    logger.info("Forward image message sent via temp media HTTP fallback")
+                elif mode == "base64":
+                    logger.info("Forward image message sent via base64 fallback")
                 return True
             except Exception as exc:
+                if mode == "source":
+                    logger.warning(f"Forward image source URL send failed: {exc}")
+                elif mode == "temp":
+                    logger.warning(f"Forward image temp media HTTP send failed: {exc}")
                 logger.warning(f"OneBot forward image send failed in mode {mode}: {exc}")
                 continue
         return False
@@ -158,9 +166,17 @@ class OneBotNapCatSender:
                             ],
                         ],
                     )
+                    if mode == "temp":
+                        logger.info("Merged image message sent via temp media HTTP fallback")
+                    elif mode == "base64":
+                        logger.info("Merged image message sent via base64 fallback")
                     sent = True
                     break
                 except Exception as exc:
+                    if mode == "source":
+                        logger.warning(f"Merged image source URL send failed: {exc}")
+                    elif mode == "temp":
+                        logger.warning(f"Merged image temp media HTTP send failed: {exc}")
                     logger.warning(
                         f"Merged OneBot image send failed in mode {mode}: {exc}"
                     )
@@ -188,9 +204,21 @@ class OneBotNapCatSender:
                             event,
                             [self._image_segment(path, source_url, mode)],
                         )
+                        if mode == "temp":
+                            logger.info(f"Image sent via temp media HTTP for {path.name}")
+                        elif mode == "base64":
+                            logger.info(f"Image sent via base64 fallback for {path.name}")
                         sent = True
                         break
                     except Exception as exc:
+                        if mode == "source":
+                            logger.warning(
+                                f"Image source URL send failed for {path.name}: {source_url} - {exc}"
+                            )
+                        elif mode == "temp":
+                            logger.warning(
+                                f"Image temp media HTTP send failed for {path.name} - {exc}"
+                            )
                         logger.warning(
                             f"OneBot image send failed for {path.name} in mode {mode}: {exc}"
                         )

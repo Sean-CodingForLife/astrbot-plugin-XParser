@@ -189,8 +189,8 @@
       "temp_media_base_url": {
         "description": "HTTP 临时媒体基地址",
         "type": "string",
-        "hint": "NapCat 可直接访问到的临时媒体服务地址，应指向插件自己启动的临时媒体 HTTP 服务，例如 http://astrbot:6190。",
-        "default": "http://astrbot:6190"
+        "hint": "NapCat 可直接访问到的临时媒体服务地址主机名，例如 http://astrbot。若未显式填写端口，插件会自动拼接上方的临时媒体 HTTP 服务端口。",
+        "default": "http://astrbot"
       },
       "temp_media_path_prefix": {
         "description": "HTTP 临时媒体路径前缀",

@@ -4,6 +4,7 @@ import re
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse, urlunparse
 
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, filter
@@ -50,6 +51,7 @@ class XParserPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
         self.config = config
+        self._maybe_migrate_temp_media_base_url_config()
         self.api_client = XApiClient(
             bearer_token=self._cfg("auth.api_bearer_token", "", "api_bearer_token"),
             api_key=self._cfg("auth.api_key", "", "api_key"),
@@ -118,17 +120,28 @@ class XParserPlugin(Star):
             * 1024
             * 1024
         )
+        temp_media_http_port = int(
+            self._cfg(
+                "send.temp_media_http_port",
+                6190,
+                "temp_media_http_port",
+            )
+        )
+        temp_media_base_url = self._normalize_temp_media_base_url(
+            str(
+                self._cfg(
+                    "send.temp_media_base_url",
+                    "http://astrbot",
+                    "temp_media_base_url",
+                )
+                or "http://astrbot"
+            ),
+            temp_media_http_port,
+        )
         self.temp_media_registry = TempMediaRegistry()
         self.temp_media_server = TempMediaServer(
             self.temp_media_registry,
-            base_url=str(
-                self._cfg(
-                    "send.temp_media_base_url",
-                    "http://astrbot:6190",
-                    "temp_media_base_url",
-                )
-                or "http://astrbot:6190"
-            ),
+            base_url=temp_media_base_url,
             path_prefix=str(
                 self._cfg(
                     "send.temp_media_path_prefix",
@@ -145,13 +158,7 @@ class XParserPlugin(Star):
                 )
                 or "0.0.0.0"
             ),
-            port=int(
-                self._cfg(
-                    "send.temp_media_http_port",
-                    6190,
-                    "temp_media_http_port",
-                )
-            ),
+            port=temp_media_http_port,
             enabled=bool(
                 self._cfg(
                     "send.enable_temp_media_http_server",
@@ -292,6 +299,94 @@ class XParserPlugin(Star):
             return default
         except AttributeError:
             return default
+
+    def _set_cfg(self, key: str, value: Any, legacy_key: str | None = None) -> bool:
+        try:
+            current: Any = self.config
+            parts = key.split(".")
+            for part in parts[:-1]:
+                child = None
+                getter = getattr(current, "get", None)
+                if getter is not None:
+                    child = getter(part, None)
+                elif isinstance(current, dict):
+                    child = current.get(part)
+                if child is None:
+                    if isinstance(current, dict):
+                        current[part] = {}
+                        child = current[part]
+                    else:
+                        return False
+                current = child
+
+            last = parts[-1]
+            setter = getattr(current, "set", None)
+            if setter is not None:
+                setter(last, value)
+                return True
+            if isinstance(current, dict):
+                current[last] = value
+                return True
+            if hasattr(current, "__setitem__"):
+                current[last] = value
+                return True
+
+            if legacy_key:
+                root_setter = getattr(self.config, "set", None)
+                if root_setter is not None:
+                    root_setter(legacy_key, value)
+                    return True
+                if isinstance(self.config, dict):
+                    self.config[legacy_key] = value
+                    return True
+            return False
+        except Exception as exc:
+            logger.debug(f"Temp media config migration skipped: {exc}")
+            return False
+
+    def _maybe_migrate_temp_media_base_url_config(self) -> None:
+        current_value = str(
+            self._cfg(
+                "send.temp_media_base_url",
+                "",
+                "temp_media_base_url",
+            )
+            or ""
+        ).strip()
+        if current_value not in {"http://astrbot:6185", "http://astrbot:6190"}:
+            return
+        if self._set_cfg(
+            "send.temp_media_base_url",
+            "http://astrbot",
+            legacy_key="temp_media_base_url",
+        ):
+            logger.info(
+                "Migrated temp_media_base_url from legacy fixed-port value to http://astrbot"
+            )
+
+    @staticmethod
+    def _normalize_temp_media_base_url(base_url: str, port: int) -> str:
+        value = (base_url or "").strip().rstrip("/")
+        if not value:
+            value = "http://astrbot"
+
+        parsed = urlparse(value)
+        if not parsed.scheme or not parsed.netloc:
+            return value
+        if parsed.port is not None:
+            return value
+
+        host = parsed.hostname or parsed.netloc
+        if ":" in host and not host.startswith("["):
+            host = f"[{host}]"
+        netloc = host
+        if parsed.username:
+            userinfo = parsed.username
+            if parsed.password:
+                userinfo += f":{parsed.password}"
+            netloc = f"{userinfo}@{netloc}"
+        netloc = f"{netloc}:{port}"
+        return urlunparse(parsed._replace(netloc=netloc)).rstrip("/")
 
     @filter.command("xparse")
     async def cmd_parse(self, event: AstrMessageEvent, url: str = ""):
