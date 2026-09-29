@@ -741,6 +741,279 @@ check(
 )
 check("不再包含无效的 is_sensitive", "is_sensitive" not in json.dumps(schema))
 
+print("\n== 黑白名单与冷却（access_control） ==")
+from xparser_plugin.core.access_control import (
+    AccessControl,
+    AccessControlConfig,
+    normalize_acl_mode,
+    normalize_id_set,
+    session_key_for_event,
+)
+
+
+class FakeACEvent:
+    """行为对齐 AstrBot 的 AstrMessageEvent：群聊有 group_id，私聊为空串。"""
+
+    def __init__(self, group_id: str = "", sender_id: str = "0"):
+        self._group_id = group_id
+        self._sender_id = sender_id
+
+    def get_group_id(self):
+        return self._group_id
+
+    def get_sender_id(self):
+        return self._sender_id
+
+
+GROUP = FakeACEvent(group_id="100", sender_id="7")
+PRIVATE = FakeACEvent(group_id="", sender_id="7")
+OTHER_GROUP = FakeACEvent(group_id="200", sender_id="7")
+OTHER_PRIVATE = FakeACEvent(group_id="", sender_id="8")
+
+
+def make_ac(**kwargs):
+    kwargs.setdefault("cooldown_seconds", 0)
+    kwargs.setdefault("same_tweet_cooldown_seconds", 0)
+    return AccessControl(AccessControlConfig(**kwargs))
+
+
+# --- 关闭模式：全放行 ---
+ac = make_ac(acl_mode=normalize_acl_mode("关闭"))
+check("关闭模式：群聊放行", ac.is_allowed(GROUP))
+check("关闭模式：私聊放行", ac.is_allowed(PRIVATE))
+
+# --- 黑名单模式 ---
+ac = make_ac(
+    acl_mode=normalize_acl_mode("黑名单"),
+    blocked_group_ids=normalize_id_set(["100"]),
+    blocked_private_user_ids=normalize_id_set([8]),
+)
+check("黑名单：命中群被拦", not ac.is_allowed(GROUP))
+check("黑名单：未命中群放行", ac.is_allowed(OTHER_GROUP))
+check("黑名单：命中私聊用户被拦", not ac.is_allowed(OTHER_PRIVATE))
+check("黑名单：未命中私聊用户放行", ac.is_allowed(PRIVATE))
+
+# --- 白名单模式：非空 ---
+ac = make_ac(
+    acl_mode=normalize_acl_mode("白名单"),
+    allowed_group_ids=normalize_id_set(["100"]),
+    allowed_private_user_ids=normalize_id_set(["7"]),
+)
+check("白名单：命中群放行", ac.is_allowed(GROUP))
+check("白名单：未命中群被拦", not ac.is_allowed(OTHER_GROUP))
+check("白名单：命中私聊用户放行", ac.is_allowed(PRIVATE))
+check("白名单：未命中私聊用户被拦", not ac.is_allowed(OTHER_PRIVATE))
+check("白名单：群与私聊互不串用", ac.is_allowed(GROUP) and not ac.is_allowed(OTHER_PRIVATE))
+
+# --- 白名单模式：列表为空 / 只配一侧 ---
+ac = make_ac(acl_mode=normalize_acl_mode("白名单"))
+check(
+    "空白名单：两份都空时视为未配置，全放行",
+    ac.is_allowed(GROUP) and ac.is_allowed(PRIVATE),
+    f"group={ac.is_allowed(GROUP)} private={ac.is_allowed(PRIVATE)}",
+)
+
+ac = make_ac(
+    acl_mode=normalize_acl_mode("白名单"),
+    allowed_group_ids=normalize_id_set(["100"]),
+)
+check("只配群白名单：命中群放行", ac.is_allowed(GROUP))
+check("只配群白名单：未命中群被拦", not ac.is_allowed(OTHER_GROUP))
+check(
+    "只配群白名单：私聊一并被拦（不再全放行）",
+    not ac.is_allowed(PRIVATE),
+    f"private allowed={ac.is_allowed(PRIVATE)}",
+)
+
+ac = make_ac(
+    acl_mode=normalize_acl_mode("白名单"),
+    allowed_private_user_ids=normalize_id_set(["7"]),
+)
+check("只配私聊白名单：命中用户放行", ac.is_allowed(PRIVATE))
+check("只配私聊白名单：未命中用户被拦", not ac.is_allowed(OTHER_PRIVATE))
+check("只配私聊白名单：群聊一并被拦", not ac.is_allowed(GROUP), f"group allowed={ac.is_allowed(GROUP)}")
+
+# 数字类型的 ID 也应匹配（AstrBot 事件里可能是 int）
+ac = make_ac(
+    acl_mode="whitelist",
+    allowed_group_ids=normalize_id_set([100]),
+)
+check("白名单：数字 ID 与字符串会话 ID 匹配", ac.is_allowed(FakeACEvent(group_id="100")))
+
+# --- 归一化 ---
+check("normalize_acl_mode 中文/英文", normalize_acl_mode("白名单") == "whitelist" and normalize_acl_mode("BLACKLIST") == "blacklist")
+check("normalize_acl_mode 未知回退 off", normalize_acl_mode("乱七八糟") == "off")
+check("normalize_id_set 数字/字符串混排", normalize_id_set([100, "200", " 300 ", ""]) == {"100", "200", "300"})
+check("normalize_id_set 单值", normalize_id_set("100") == {"100"})
+check("normalize_id_set None", normalize_id_set(None) == set())
+check("session_key 群聊按群维度", session_key_for_event(GROUP) == "group:100")
+check("session_key 私聊按用户维度", session_key_for_event(PRIVATE) == "private:7")
+
+print("\n== 黑白名单 + 冷却：与插件 check() 的联动 ==")
+
+# 关闭模式且无冷却：连续解析都应放行并记录
+ac = make_ac(acl_mode="off")
+ok1, _ = ac.check(GROUP, "111")
+ok2, _ = ac.check(GROUP, "222")
+check("无冷却：连续不同推文放行", ok1 and ok2)
+
+# 会话冷却：同会话第二次应被拦
+ac = make_ac(acl_mode="off", cooldown_seconds=10)
+ok1, _ = ac.check(GROUP, "111")
+ok2, reason2 = ac.check(GROUP, "222")
+ok3, _ = ac.check(OTHER_GROUP, "333")
+check("会话冷却：首次放行", ok1)
+check("会话冷却：同群再次被拦", not ok2 and reason2 is not None, str(reason2))
+check("会话冷却：不跨群", ok3)
+
+# 同推文冷却：不同会话互不影响、同会话同推文被拦
+ac = make_ac(acl_mode="off", same_tweet_cooldown_seconds=120)
+check("同推文冷却：首次放行", ac.check(GROUP, "111")[0])
+check("同推文冷却：同群同推文被拦", not ac.check(GROUP, "111")[0])
+ac2 = make_ac(acl_mode="off", same_tweet_cooldown_seconds=120)
+ac2.check(GROUP, "111")
+check("同推文冷却：别的群同推文放行", ac2.check(OTHER_GROUP, "111")[0])
+
+# 被白名单拒绝时不应消耗冷却额度
+ac = make_ac(
+    acl_mode="whitelist",
+    allowed_group_ids={"100"},
+    cooldown_seconds=10,
+)
+denied, reason = ac.check(OTHER_GROUP, "111")
+check("白名单拒绝时给出原因", (not denied) and reason is not None, str(reason))
+check(
+    "白名单拒绝不应写入冷却记录",
+    OTHER_GROUP and ac._session_last_parse_at == {},
+    str(ac._session_last_parse_at),
+)
+
+print("\n== 黑白名单 + 插件入口（/xparse 与自动解析） ==")
+
+
+class ACLTweet:
+    id = "1234567890"
+    author_id = "u1"
+    text = "hi"
+    created_at = None
+    public_metrics = None
+    attachments = None
+
+
+class ACLResponse:
+    def __init__(self):
+        self.data = ACLTweet()
+        self.includes = SimpleIncludes([])
+
+
+class ACLApiClient:
+    def __init__(self):
+        self.calls = 0
+
+    async def get_tweet(self, **kwargs):
+        self.calls += 1
+        return ACLResponse()
+
+
+class ACLSender:
+    async def send_tweet_media(self, event, text, images, videos):
+        pass
+
+
+class ACLEvent(FakeACEvent):
+    def __init__(self, group_id="", sender_id="7", text="看这个 https://x.com/a/status/1234567890"):
+        super().__init__(group_id, sender_id)
+        self.message_str = text
+        self.sent = []
+        self.stopped = False
+        self.get_platform_name = lambda: "aiocqhttp"
+
+    async def send(self, result):
+        self.sent.append(result)
+
+    def chain_result(self, chain):
+        return chain
+
+    def stop_event(self):
+        self.stopped = True
+
+    def get_sender_name(self):
+        return "tester"
+
+
+def make_plugin(access_control, *, enable_auto_parse=True):
+    plugin = XParserPlugin.__new__(XParserPlugin)
+    plugin.access_control = access_control
+    plugin.enable_auto_parse = enable_auto_parse
+    plugin.api_client = ACLApiClient()
+    plugin.sender = ACLSender()
+    plugin.media_processor = FakeProcessor()
+    plugin.tweet_text_template = "{author}\n{text}"
+    return plugin
+
+
+def reason_text(event) -> str:
+    texts = []
+    for item in event.sent:
+        chain = item.chain if hasattr(item, "chain") else item
+        for comp in chain or []:
+            text = getattr(comp, "text", None)
+            if text:
+                texts.append(text)
+    return " / ".join(texts)
+
+
+async def acl_plugin_test():
+    # 黑名单群：/xparse 应明确提示且不调用 API
+    ac = make_ac(acl_mode="blacklist", blocked_group_ids={"100"})
+    plugin = make_plugin(ac)
+    event = ACLEvent(group_id="100")
+    await plugin.cmd_parse(event, "")
+    check("黑名单群 /xparse 不请求 API", plugin.api_client.calls == 0, f"calls={plugin.api_client.calls}")
+    check(
+        "黑名单群 /xparse 有明确提示",
+        "不在 XParser 允许解析范围内" in reason_text(event),
+        reason_text(event),
+    )
+
+    # 非白名单群：自动解析静默跳过，且不终止事件（把消息留给 LLM）
+    ac = make_ac(acl_mode="whitelist", allowed_group_ids={"999"})
+    plugin = make_plugin(ac)
+    event = ACLEvent(group_id="100")
+    await plugin.auto_parse_tweet_url(event)
+    check("白名单外群 自动解析不请求 API", plugin.api_client.calls == 0, f"calls={plugin.api_client.calls}")
+    check("白名单外群 自动解析静默", not event.sent, reason_text(event))
+    check("白名单外群 不终止事件", event.stopped is False)
+
+    # 白名单内群：自动解析放行并终止事件
+    ac = make_ac(acl_mode="whitelist", allowed_group_ids={"100"})
+    plugin = make_plugin(ac)
+    event = ACLEvent(group_id="100")
+    await plugin.auto_parse_tweet_url(event)
+    check("白名单内群 自动解析请求 API", plugin.api_client.calls == 1, f"calls={plugin.api_client.calls}")
+    check("白名单内群 终止事件", event.stopped is True)
+
+    # 空白名单：两份都未配置，视为未启用管控 -> 放行
+    ac = make_ac(acl_mode="whitelist")
+    plugin = make_plugin(ac)
+    event = ACLEvent(group_id="100")
+    await plugin.auto_parse_tweet_url(event)
+    check("空白名单 自动解析放行", plugin.api_client.calls == 1, f"calls={plugin.api_client.calls}")
+
+    # 只配群白名单：私聊用户不应被放行
+    ac = make_ac(acl_mode="whitelist", allowed_group_ids={"100"})
+    plugin = make_plugin(ac)
+    private_event = ACLEvent(group_id="", sender_id="7")
+    await plugin.auto_parse_tweet_url(private_event)
+    check(
+        "只配群白名单时私聊不解析",
+        plugin.api_client.calls == 0,
+        f"calls={plugin.api_client.calls}",
+    )
+
+
+asyncio.run(acl_plugin_test())
+
 print("\n================ 结果 ================")
 if failures:
     for item in failures:

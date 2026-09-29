@@ -51,10 +51,25 @@ class AccessControl:
             target_id = user_id
 
         if self.config.acl_mode == "whitelist":
-            return not allowed_ids or target_id in allowed_ids
+            # 白名单语义：
+            # - 群聊只查群白名单，私聊只查用户白名单，两者互不串用；
+            # - 两份白名单都为空时视为「未配置」，全放行；
+            # - 只要配了任意一份白名单，就表示已启用白名单管控，
+            #   此时空白的那一类（例如只配了群、没配私聊）应判为不允许，
+            #   否则「白名单模式 + 只填群号」会把私聊全部放行。
+            if not allowed_ids and not self._whitelist_configured:
+                return True
+            return target_id in allowed_ids
         if self.config.acl_mode == "blacklist":
             return target_id not in blocked_ids
         return True
+
+    @property
+    def _whitelist_configured(self) -> bool:
+        """是否配置了任意一份白名单（群或私聊）。"""
+        return bool(
+            self.config.allowed_group_ids or self.config.allowed_private_user_ids
+        )
 
     def cooldown_wait_seconds(self, event: Any, tweet_id: str) -> int:
         session_key = session_key_for_event(event)
