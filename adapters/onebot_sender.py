@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import base64
 import inspect
-import mimetypes
 from pathlib import Path
 from typing import Any
 
 from astrbot.api import logger
 from astrbot.core.message.components import Image, Plain, Video
 
+from ..core.media_utils import image_mime_for_path
 from ..core.onebot_stream_client import OneBotStreamClient
 from ..core.temp_media_server import TempMediaServer
 
@@ -383,38 +383,57 @@ class OneBotSender:
                             f"视频/GIF 临时 HTTP URL 发送失败：{path.name} | {exc}"
                         )
 
-        use_stream = self.transfer_mode == "stream" or (
-            self.transfer_mode == "auto" and path.stat().st_size >= self.stream_threshold_bytes
+        prefer_stream = self.transfer_mode == "stream" or (
+            self.transfer_mode == "auto"
+            and path.stat().st_size >= self.stream_threshold_bytes
         )
 
-        if use_stream or self.transfer_mode == "stream":
-            if await self.stream_client.upload_stream_then_send_video(
-                event,
-                path,
-                allow_file_fallback=self.send_video_as_file,
+        if prefer_stream:
+            # 配置倾向流式（stream 模式，或 auto 下的大文件）：先走流式，再本地视频消息
+            if await self._try_stream_upload(event, path):
+                return
+            if self.transfer_mode != "stream" and await self._try_local_video_message(
+                event, path, source_url
             ):
                 return
-            if self.transfer_mode == "stream":
-                await event.send(event.chain_result([Plain(f"流式上传发送失败，原始直链：{source_url}")]))
+        else:
+            # 配置倾向本地直发（local 模式，或 auto 下的小文件）：先本地，再流式
+            if await self._try_local_video_message(event, path, source_url):
+                return
+            if self.transfer_mode != "local" and await self._try_stream_upload(
+                event, path
+            ):
                 return
 
         try:
-            if self.transfer_mode in ("auto", "local"):
-                await event.send(event.chain_result([Video.fromFileSystem(str(path))]))
-                return
-        except Exception as exc:
-            logger.warning(
-                f"本地视频消息发送失败，准备回退到流式上传：{source_url} | {exc}"
+            await event.send(
+                event.chain_result([Plain(f"视频发送失败，原始直链：{source_url}")])
             )
+        except Exception as exc:
+            # 平台侧连兜底文本都发不出去时，只记录日志，不向上抛出打断整个解析流程。
+            logger.warning(f"视频发送失败且兜底提示发送失败：{source_url} | {exc}")
 
-        if await self.stream_client.upload_stream_then_send_video(
+    async def _try_stream_upload(self, event: Any, path: Path) -> bool:
+        """尝试流式上传链路，返回是否已经成功投递（含文件回退成功）。"""
+        status = await self.stream_client.upload_stream_then_send_video_status(
             event,
             path,
             allow_file_fallback=self.send_video_as_file,
-        ):
-            return
+        )
+        return status in ("stream", "file")
 
-        await event.send(event.chain_result([Plain(f"视频发送失败，原始直链：{source_url}")]))
+    async def _try_local_video_message(
+        self, event: Any, path: Path, source_url: str
+    ) -> bool:
+        """尝试把本地文件当作视频消息直接发送。"""
+        try:
+            await event.send(event.chain_result([Video.fromFileSystem(str(path))]))
+            return True
+        except Exception as exc:
+            logger.warning(
+                f"本地视频消息发送失败：{source_url} | {path.name} | {exc}"
+            )
+            return False
 
     def _image_send_modes(self) -> list[str]:
         modes = ["source"]
@@ -434,7 +453,7 @@ class OneBotSender:
             return {"type": "image", "data": {"file": source_url}}
 
         if mode == "temp" and self.temp_media_server is not None:
-            mime_type = mimetypes.guess_type(str(path))[0] or "image/jpeg"
+            mime_type = image_mime_for_path(path, "image/jpeg")
             temp_url = self.temp_media_server.create_temp_url(
                 path,
                 mime_type,
@@ -454,10 +473,9 @@ class OneBotSender:
             return {"type": "video", "data": {"file": source_url}}
 
         if mode == "temp" and self.temp_media_server is not None:
-            mime_type = mimetypes.guess_type(str(path))[0] or "video/mp4"
             temp_url = self.temp_media_server.create_temp_url(
                 path,
-                mime_type,
+                "video/mp4",
                 ttl_seconds=self.temp_media_ttl_seconds,
             )
             if temp_url:
@@ -465,6 +483,10 @@ class OneBotSender:
             logger.warning(
                 f"视频临时 HTTP URL 生成失败，准备回退到后续视频发送链路：{path.name}"
             )
+
+        if mode == "source":
+            # 没有原始 URL 时不能在 source 轮次空转，让调用方直接进入后续链路。
+            raise RuntimeError("no source url available for source mode")
 
         raise RuntimeError(f"unsupported video send mode: {mode}")
 

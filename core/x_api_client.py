@@ -85,6 +85,28 @@ _GRAPHQL_TWEET_FEATURES = json.dumps(
 )
 
 
+class XApiError(ValueError):
+    """X API 调用失败的统一异常基类。
+
+    继承 ValueError 以兼容既有调用方对凭证/网络类错误的处理方式。
+    """
+
+    def __init__(self, message: str, status_code: int | None = None):
+        super().__init__(message)
+        self.status_code = status_code
+
+
+class XApiNotFoundError(XApiError, FileNotFoundError):
+    """目标资源不存在（HTTP 404）。
+
+    同时继承 ValueError 与 FileNotFoundError，兼容两种既有捕获习惯。
+    """
+
+
+class XApiForbiddenError(XApiError):
+    """权限被拒（HTTP 403）。"""
+
+
 class XApiClient:
     """
     X API v2 异步客户端
@@ -605,6 +627,8 @@ class XApiClient:
             raise ValueError("❌ Cookie GraphQL 请求超时，请检查网络或代理配置。")
         except httpx.ConnectError as e:
             raise ValueError(f"❌ Cookie GraphQL 连接失败：{str(e)}")
+        except XApiError:
+            raise
         except (ValueError, FileNotFoundError):
             raise
         except Exception as e:
@@ -669,6 +693,12 @@ class XApiClient:
                 raise ValueError(
                     "⚠️ Cookie 降级认证触发速率限制 (429)：请求过于频繁，请稍后重试。"
                 )
+            elif response.status_code == 404:
+                raise XApiNotFoundError(
+                    f"❌ Cookie 降级认证请求的资源不存在 (404)："
+                    f"{response.text[:200]}",
+                    status_code=404,
+                )
             elif response.status_code >= 400:
                 raise ValueError(
                     f"❌ Cookie 降级认证请求失败 ({response.status_code})："
@@ -681,6 +711,10 @@ class XApiClient:
             raise ValueError("❌ Cookie 降级请求超时，请检查网络或代理配置。")
         except httpx.ConnectError as e:
             raise ValueError(f"❌ Cookie 降级连接失败：{str(e)}")
+        except XApiError:
+            raise
+        except FileNotFoundError:
+            raise
         except ValueError:
             raise
         except Exception as e:
@@ -828,12 +862,13 @@ class XApiClient:
                             json_data=json_data,
                         )
                 
-                raise ValueError(
+                raise XApiForbiddenError(
                     "❌ 权限被拒：API 返回 403 Forbidden。可能原因：\n"
                     "1. API Key 权限不足（建议升级到 Basic 或 Pro）\n"
                     "2. OAuth 1.0a 凭据无效或权限不足\n"
                     "3. 内容受限或账户限制\n"
-                    "4. 需要提供有效的 Cookie 进行降级认证"
+                    "4. 需要提供有效的 Cookie 进行降级认证",
+                    status_code=403,
                 )
             
             elif response.status_code == 429:
@@ -867,14 +902,23 @@ class XApiClient:
                 )
 
             elif 400 <= response.status_code < 500:
-                # 其他 4xx 客户端错误
+                # 其他 4xx 客户端错误（404 单独用类型化异常表达，便于上层精确识别）
                 error_msg = response_data.get('detail', response_data.get('message', '未知错误'))
-                raise ValueError(f"❌ 客户端错误 ({response.status_code})：{error_msg}")
+                if response.status_code == 404:
+                    raise XApiNotFoundError(
+                        f"❌ 目标资源不存在 (404)：{error_msg}",
+                        status_code=404,
+                    )
+                raise XApiError(
+                    f"❌ 客户端错误 ({response.status_code})：{error_msg}",
+                    status_code=response.status_code,
+                )
             
             elif response.status_code >= 500:
                 # 5xx 服务器错误
-                raise ValueError(
-                    f"❌ 服务器错误 ({response.status_code})：X API 服务暂时不可用。请稍后重试。"
+                raise XApiError(
+                    f"❌ 服务器错误 ({response.status_code})：X API 服务暂时不可用。请稍后重试。",
+                    status_code=response.status_code,
                 )
             
             # 成功响应
@@ -883,6 +927,10 @@ class XApiClient:
                 "headers": response_headers
             }
         
+        except XApiError:
+            # 上面抛出的业务错误（含 404/403 类型化异常）保持原样向上传递
+            raise
+
         except httpx.TimeoutException:
             raise ValueError(
                 "❌ 请求超时：连接到 X API 超过 10 秒。\n"
@@ -899,6 +947,10 @@ class XApiClient:
                 f"详细错误: {str(e)}"
             )
         
+        except FileNotFoundError:
+            # Cookie 降级通道可能直接抛出「推文不可访问/已删除」
+            raise
+
         except Exception as e:
             logger.error(f"HTTP 请求异常: {str(e)}", exc_info=True)
             raise ValueError(f"❌ 网络请求失败：{type(e).__name__} - {str(e)}")
@@ -1011,10 +1063,8 @@ class XApiClient:
         
         try:
             response = await self._make_request("GET", url, params=params)
-        except ValueError as e:
-            if "404" in str(e):
-                raise FileNotFoundError(f"推文 {tweet_id} 不存在或已删除")
-            raise
+        except XApiNotFoundError as e:
+            raise FileNotFoundError(f"推文 {tweet_id} 不存在或已删除") from e
         
         tweet_response = TweetResponse(
             data=response["data"].get("data"),
@@ -1063,10 +1113,8 @@ class XApiClient:
         
         try:
             response = await self._make_request("GET", url, params=params)
-        except ValueError as e:
-            if "404" in str(e):
-                raise FileNotFoundError(f"用户 @{username} 不存在")
-            raise
+        except XApiNotFoundError as e:
+            raise FileNotFoundError(f"用户 @{username} 不存在") from e
         
         user_response = UserLookupResponse(
             data=response["data"].get("data"),
@@ -1267,23 +1315,20 @@ class XApiClient:
         try:
             # 趋势端点官方文档要求 Bearer Token 认证
             response = await self._make_request("GET", url, use_bearer_token=True)
-        except ValueError as e:
-            if "403" in str(e):
-                # Bearer Token 权限不足，尝试 Cookie 降级
-                logger.warning(f"⚠️ 趋势端点返回 403，尝试 Cookie 降级...")
-                try:
-                    response = await self._make_request("GET", url, use_cookie_fallback=True)
-                except Exception as e:
-                    logger.debug(f"Cookie 降级认证失败: {e}")
-                    raise ValueError(
-                        f"❌ 趋势获取失败（API 返回 403）：\n"
-                        f"可能原因：\n"
-                        f"1. API Key 权限不足（趋势端点可能需要更高访问层级）\n"
-                        f"2. 未配置有效的 Bearer Token\n"
-                        f"3. 未配置 Cookie 降级认证"
-                    ) from e
-            else:
-                raise
+        except XApiForbiddenError:
+            # Bearer Token 权限不足，尝试 Cookie 降级
+            logger.warning("⚠️ 趋势端点返回 403，尝试 Cookie 降级...")
+            try:
+                response = await self._make_request("GET", url, use_cookie_fallback=True)
+            except Exception as e:
+                logger.debug(f"Cookie 降级认证失败: {e}")
+                raise ValueError(
+                    f"❌ 趋势获取失败（API 返回 403）：\n"
+                    f"可能原因：\n"
+                    f"1. API Key 权限不足（趋势端点可能需要更高访问层级）\n"
+                    f"2. 未配置有效的 Bearer Token\n"
+                    f"3. 未配置 Cookie 降级认证"
+                ) from e
         
         trends_response = TrendsResponse(
             data=response["data"].get("data"),

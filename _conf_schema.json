@@ -9,49 +9,49 @@
         "type": "string",
         "hint": "通常只填写这一项就可以解析文字、图片和视频信息。",
         "default": "",
-        "is_sensitive": true
+        "secret": true
       },
       "api_key": {
         "description": "Consumer Key / API Key（可选）",
         "type": "string",
         "hint": "OAuth 1.0a 的 Consumer Key，需要和另外三项 OAuth 凭据一起填写。",
         "default": "",
-        "is_sensitive": true
+        "secret": true
       },
       "api_key_secret": {
         "description": "Consumer Secret / API Secret（可选）",
         "type": "string",
         "hint": "OAuth 1.0a 的 Consumer Secret，需要和另外三项 OAuth 凭据一起填写。",
         "default": "",
-        "is_sensitive": true
+        "secret": true
       },
       "oauth_access_token": {
         "description": "Access Token（可选）",
         "type": "string",
         "hint": "OAuth 1.0a 的 Access Token，需要和另外三项 OAuth 凭据一起填写。",
         "default": "",
-        "is_sensitive": true
+        "secret": true
       },
       "oauth_access_token_secret": {
         "description": "Access Token Secret（可选）",
         "type": "string",
         "hint": "OAuth 1.0a 的 Access Token Secret，需要和另外三项 OAuth 凭据一起填写。",
         "default": "",
-        "is_sensitive": true
+        "secret": true
       },
       "cookie_auth_token": {
         "description": "Cookie 降级认证：auth_token（可选）",
         "type": "string",
         "hint": "当官方 X API 权限不足或配额耗尽时，可使用网页登录 Cookie 作为降级解析。需要和 ct0 同时填写。",
         "default": "",
-        "is_sensitive": true
+        "secret": true
       },
       "cookie_ct0": {
         "description": "Cookie 降级认证：ct0（可选）",
         "type": "string",
         "hint": "Twitter/X 网页端的 CSRF Token，需要和 auth_token 同时填写。",
         "default": "",
-        "is_sensitive": true
+        "secret": true
       },
       "graphql_tweet_query_id": {
         "description": "GraphQL 推文查询 ID（通常留空）",

@@ -6,7 +6,7 @@ XParser 是一个用于 AstrBot 的 X/Twitter 推文解析插件。插件核心�
 
 - 插件名：`astrbot_plugin_xparser`
 - 显示名：`XParser`
-- 当前版本：`v0.1.0`
+- 当前版本：`v0.1.1`
 - 作者：`seant`
 - 仓库地址：[Sean-CodingForLife/astrbot-plugin-XParser](https://github.com/Sean-CodingForLife/astrbot-plugin-XParser)
 - AstrBot 版本要求：`>= 4.0.0`
@@ -69,6 +69,9 @@ XParser 是一个用于 AstrBot 的 X/Twitter 推文解析插件。插件核心�
 1. 原始图片 URL
 2. 插件临时媒体 HTTP URL
 3. `base64://`
+
+下载到本地的图片会按最终字节的真实格式落盘（JPEG / PNG / GIF / WebP），
+临时媒体 HTTP URL 返回的 `Content-Type` 也随之匹配，避免出现「PNG 内容却带 .jpg 后缀」的错配。
 
 ### 视频 / GIF
 
@@ -241,13 +244,20 @@ transport.enable_temp_media_http_fallback = false
 |---|---|
 | `auto` | 小视频优先直接发送，失败或视频较大时切到流式上传 |
 | `stream` | 强制优先走流式上传 |
-| `local` | 只尝试本地文件视频消息 |
+| `local` | 只尝试本地文件视频消息，不会回退到流式上传 |
 
 对于 AstrBot 与发送适配器分容器部署，推荐：
 
 ```text
 auto
 ```
+
+## 自动解析与 LLM
+
+聊天中出现推文链接时，插件会直接发送解析结果，并终止该消息的事件传播，
+不会再让同一条消息走一遍 LLM 链路，避免重复回复。
+如果你希望链接同时交给 LLM 处理，请关闭 `parse.enable_auto_parse`，
+改用 `/xparse <url>` 手动解析。
 
 ## 常见问题
 
@@ -290,10 +300,23 @@ transport.temp_media_base_url
 main.py                         AstrBot 插件入口
 core/x_api_client.py            X/Twitter API 与 Cookie GraphQL 请求
 core/media_processor.py         媒体下载、图片压缩、视频变体选择
+core/media_utils.py             图片格式嗅探与 MIME 推断
 core/access_control.py          冷却与访问控制
 core/onebot_stream_client.py    当前内置 OneBot 流式上传能力封装
 core/temp_media_registry.py     临时媒体 token 注册表与 TTL
 core/temp_media_server.py       插件自建临时媒体 HTTP 服务
 adapters/onebot_sender.py       当前内置 OneBot 发送适配
 models/                         X/Twitter 响应模型
+tests/selfcheck.py              离线自检脚本（无需安装 AstrBot）
 ```
+
+## 离线自检
+
+`tests/selfcheck.py` 会用桩模块加载插件本体，校验推文链接识别、图片格式与落盘扩展名、
+视频投递策略、流式上传分块、API 错误分类等关键行为，不需要安装 AstrBot：
+
+```bash
+python tests/selfcheck.py
+```
+
+退出码为 `0` 表示全部通过。

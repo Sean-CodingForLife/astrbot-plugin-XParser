@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import re
 import time
 from pathlib import Path
@@ -19,6 +20,7 @@ from .core.access_control import (
     normalize_id_set,
 )
 from .core.media_processor import MediaProcessor
+from .core.media_utils import guess_image_extension
 from .core.onebot_stream_client import OneBotStreamClient
 from .core.temp_media_registry import TempMediaRegistry
 from .core.temp_media_server import TempMediaServer
@@ -45,7 +47,7 @@ DEFAULT_TWEET_TEXT_TEMPLATE = (
     "astrbot_plugin_xparser",
     "seant",
     "用于 AstrBot aiocqhttp/OneBot 场景的 X/Twitter 推文解析插件，内置 OneBot 发送适配器",
-    "0.1.0",
+    "0.1.1",
 )
 class XParserPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
@@ -276,7 +278,6 @@ class XParserPlugin(Star):
                 f"{self.temp_media_server.host}:{self.temp_media_server.port}: {exc}. "
                 "Please change transport.temp_media_http_port and transport.temp_media_base_url."
             )
-        self.temp_media_registry.cleanup_expired()
         self._warn_send_config_ignored_fields()
 
     def _cfg(self, key: str, default: Any, legacy_key: str | None = None) -> Any:
@@ -295,7 +296,9 @@ class XParserPlugin(Star):
             if legacy_key:
                 return self.config.get(legacy_key, default)
             return default
-        except AttributeError:
+        except (AttributeError, TypeError):
+            # 兼容配置对象形态变化（例如非 Mapping 的配置节点），
+            # 任何取值异常都安全回退到默认值，避免插件初始化直接失败。
             return default
 
     def _warn_temp_media_base_url_config(self) -> None:
@@ -315,11 +318,19 @@ class XParserPlugin(Star):
                 f"{raw_value}。建议使用 http://astrbot 这样的完整 URL。"
             )
             return
-        if parsed.port is not None:
+        try:
+            parsed_port = parsed.port
+        except ValueError:
             logger.warning(
-                "temp_media_base_url 中检测到显式端口："
-                f"{raw_value}。建议写成不带端口的 http://astrbot，"
-                "插件会自动拼接 transport.temp_media_http_port。"
+                "temp_media_base_url 中的端口无法解析："
+                f"{raw_value}。插件将改用 transport.temp_media_http_port 配置的端口。"
+            )
+            return
+        if parsed_port is not None and parsed_port != self.temp_media_server.port:
+            logger.warning(
+                "temp_media_base_url 中的显式端口与 transport.temp_media_http_port 不一致："
+                f"{raw_value}（端口 {parsed_port}）与 "
+                f"{self.temp_media_server.port}。发送侧可能访问不到临时媒体服务。"
             )
 
     def _warn_send_config_ignored_fields(self) -> None:
@@ -339,7 +350,7 @@ class XParserPlugin(Star):
 
         if send_mode != "forward":
             logger.info(
-                "当前发送样式为普通消息，已忽略合并转发节点相关设置："
+                "当前发送样式为普通消息，常规情况下不会使用合并转发节点设置："
                 "send.forward_node_name / send.forward_node_uin_mode / send.forward_node_uin"
             )
         if send_mode != "forward" and forward_node_uin != "10000":
@@ -352,12 +363,12 @@ class XParserPlugin(Star):
                 f"当前合并转发节点 UIN 策略为 {forward_node_uin_mode}，"
                 f"已忽略自定义 send.forward_node_uin={forward_node_uin}。"
             )
-        if send_mode != "normal":
+        if send_mode == "forward":
             logger.info(
-                "当前发送样式为合并转发，已忽略普通消息图文合并相关设置："
-                "send.merge_text_and_images / send.max_merged_images"
+                "当前发送样式为合并转发；若合并转发发送失败并回退到普通消息，"
+                "仍会使用 send.merge_text_and_images / send.max_merged_images。"
             )
-        if send_mode == "normal" and not merge_text_and_images:
+        elif not merge_text_and_images:
             logger.info(
                 "当前普通消息模式未启用图文合并，send.max_merged_images 当前不会生效。"
             )
@@ -370,8 +381,20 @@ class XParserPlugin(Star):
 
         parsed = urlparse(value)
         if not parsed.scheme or not parsed.netloc:
+            # 不是完整 URL（例如只写了 astrbot），原样返回由上层校验提示
             return value
-        if parsed.port is not None:
+
+        try:
+            explicit_port = parsed.port
+        except ValueError:
+            # 端口非法（例如 http://astrbot:abc）：忽略该端口并改用配置端口，
+            # 不能因为用户配置笔误直接把插件初始化打断。
+            explicit_port = None
+            logger.warning(
+                f"temp_media_base_url 端口非法，已忽略并改用 transport.temp_media_http_port：{value}"
+            )
+
+        if explicit_port is not None:
             return value
 
         host = parsed.hostname or parsed.netloc
@@ -413,6 +436,9 @@ class XParserPlugin(Star):
         if not await self._can_parse_event(event, tweet_id, silent=True):
             return
         await self._parse_and_send(event, tweet_id)
+        # 推文已经由插件直接回复，终止事件传播，避免同一条消息再走一遍 LLM 链路
+        # （否则会重复回复，或在冷却命中时冒出多余的报错信息）。
+        event.stop_event()
 
     async def _can_parse_event(
         self,
@@ -446,10 +472,14 @@ class XParserPlugin(Star):
         if not response.includes or not response.includes.media:
             return response
         for media in response.includes.media:
-            if media.variants:
-                best = self.media_processor.select_best_variant(media.variants)
-                if best and best.get("url"):
-                    media.url = best["url"]
+            # 只有视频 / GIF 才存在多变体，图片的 media.url 不能被变体覆盖。
+            if media.type not in ("video", "animated_gif"):
+                continue
+            if not media.variants:
+                continue
+            best = self.media_processor.select_best_variant(media.variants)
+            if best and best.get("url"):
+                media.url = best["url"]
         return response
 
     def _format_tweet(self, response: TweetResponse) -> str:
@@ -556,7 +586,10 @@ class XParserPlugin(Star):
             if not data:
                 return None
             data = await self.media_processor.compress_image(data)
-            path = self.image_dir / f"img_{tweet_id}_{hash(url) & 0xFFFFFFFF}.jpg"
+            # 压缩可能会改变实际编码（例如未知格式统一转成 JPEG），
+            # 因此文件名扩展名必须按最终字节的真实格式决定。
+            extension = guess_image_extension(data)
+            path = self.image_dir / f"img_{tweet_id}_{self._url_digest(url)}{extension}"
             path.write_bytes(data)
             return path
         except Exception as exc:
@@ -568,12 +601,17 @@ class XParserPlugin(Star):
             data = await self.media_processor.download_media(url)
             if not data:
                 return None
-            path = self.video_dir / f"vid_{tweet_id}_{hash(url) & 0xFFFFFFFF}.mp4"
+            path = self.video_dir / f"vid_{tweet_id}_{self._url_digest(url)}.mp4"
             path.write_bytes(data)
             return path
         except Exception as exc:
             logger.warning(f"Video media download failed: {url} - {exc}")
             return None
+
+    @staticmethod
+    def _url_digest(url: str) -> str:
+        """为媒体 URL 生成稳定的短摘要，用作缓存文件名（避免进程级随机 hash）。"""
+        return hashlib.sha1(url.encode("utf-8", errors="replace")).hexdigest()[:10]
 
     @staticmethod
     def _extract_tweet_id(text: str) -> str | None:

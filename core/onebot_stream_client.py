@@ -63,33 +63,46 @@ class OneBotStreamClient:
 
         file_name = name or file_path.name
         mime_type = mimetypes.guess_type(file_name)[0] or "application/octet-stream"
-        data = file_path.read_bytes()
-        expected_sha256 = hashlib.sha256(data).hexdigest()
         stream_id = uuid.uuid4().hex
         total_chunks = (size + self.chunk_size - 1) // self.chunk_size
 
+        # 分块流式发送，避免把整个文件读进内存；摘要先流式算好，
+        # 保证每个分块与完成包里都带有同一个 expected_sha256。
+        digest = hashlib.sha256()
+        with file_path.open("rb") as digest_file:
+            for block in iter(lambda: digest_file.read(self.chunk_size), b""):
+                digest.update(block)
+        expected_sha256 = digest.hexdigest()
         final_result: Any = None
 
         try:
-            for chunk_index in range(total_chunks):
-                start = chunk_index * self.chunk_size
-                chunk = data[start : start + self.chunk_size]
-                payload = {
-                    "stream_id": stream_id,
-                    "chunk_data": base64.b64encode(chunk).decode("ascii"),
-                    "chunk_index": chunk_index,
-                    "total_chunks": total_chunks,
-                    "file_size": size,
-                    "expected_sha256": expected_sha256,
-                    "filename": file_name,
-                    "mime": mime_type,
-                    "folder": folder,
-                }
-                final_result = await self._call_stream_action(bot, payload)
+            with file_path.open("rb") as file_obj:
+                for chunk_index in range(total_chunks):
+                    chunk = file_obj.read(self.chunk_size)
+                    if not chunk:
+                        break
+                    payload = {
+                        "stream_id": stream_id,
+                        "chunk_data": base64.b64encode(chunk).decode("ascii"),
+                        "chunk_index": chunk_index,
+                        "total_chunks": total_chunks,
+                        "file_size": size,
+                        "expected_sha256": expected_sha256,
+                        "filename": file_name,
+                        "mime": mime_type,
+                        "folder": folder,
+                    }
+                    final_result = await self._call_stream_action(bot, payload)
 
             complete_payload = {
                 "stream_id": stream_id,
                 "is_complete": True,
+                "file_size": size,
+                "total_chunks": total_chunks,
+                "expected_sha256": expected_sha256,
+                "filename": file_name,
+                "mime": mime_type,
+                "folder": folder,
             }
             final_result = await self._call_stream_action(bot, complete_payload)
             uploaded_path = self._extract_uploaded_path(final_result)
@@ -101,9 +114,6 @@ class OneBotStreamClient:
         except Exception as exc:
             logger.warning(f"流式上传失败：{file_name} | {exc}")
             return None
-
-        logger.warning("当前 OneBot 客户端不支持流式上传")
-        return None
 
     async def upload_stream_then_send_file(
         self,
@@ -158,6 +168,33 @@ class OneBotStreamClient:
         folder: str = "/",
         allow_file_fallback: bool = True,
     ) -> bool:
+        """兼容旧调用方的布尔版本：只要链路中任一环节成功即返回 True。"""
+        status = await self.upload_stream_then_send_video_status(
+            event,
+            file_path,
+            name=name,
+            folder=folder,
+            allow_file_fallback=allow_file_fallback,
+        )
+        return status in ("stream", "file")
+
+    async def upload_stream_then_send_video_status(
+        self,
+        event: Any,
+        file_path: Path,
+        *,
+        name: str | None = None,
+        folder: str = "/",
+        allow_file_fallback: bool = True,
+    ) -> str:
+        """流式上传后尝试作为视频消息发送。
+
+        Returns:
+            "stream": 视频消息已通过流式上传的文件发送成功
+            "file":   视频消息失败，但已回退为文件发送成功
+            "stream_failed": 尝试过流式上传链路但整体失败
+            "skipped": 流式上传未开始（不支持、无 bot 客户端、文件不合法等）
+        """
         uploaded_path = await self.upload_file_stream(
             event,
             file_path,
@@ -165,33 +202,33 @@ class OneBotStreamClient:
             folder=folder,
         )
         if not uploaded_path:
-            return False
+            return "skipped"
 
         bot = getattr(event, "bot", None)
         if bot is None:
-            return False
+            return "skipped"
 
         file_name = name or Path(file_path).name
         try:
             message = [{"type": "video", "data": {"file": uploaded_path}}]
             await self._send_message(event, bot, message)
             logger.info(f"流式上传后已作为视频消息发送：{file_name}")
-            return True
+            return "stream"
         except Exception as exc:
             logger.warning(
                 f"流式上传后的视频消息发送失败，准备回退到文件发送：{file_name} | {exc}"
             )
 
         if not allow_file_fallback:
-            return False
+            return "stream_failed"
 
         try:
             await self._send_file(event, bot, uploaded_path, file_name)
             logger.info(f"流式上传后已回退为文件发送：{file_name}")
-            return True
+            return "file"
         except Exception as exc:
             logger.warning(f"流式上传后的文件回退发送失败：{file_name} | {exc}")
-            return False
+            return "stream_failed"
 
     async def _call_stream_action(self, bot: Any, payload: dict[str, Any]) -> Any:
         return await self._call_onebot_action(bot, "upload_file_stream", **payload)
